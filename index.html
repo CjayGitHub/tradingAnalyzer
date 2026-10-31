@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html lang="tl">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Analyzer">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#0b0f17">
+<title>Trading Analyzer</title>
+<style>
+  :root{
+    --bg:#0b0f17; --card:#141b27; --line:#223046; --text:#e8eef7; --mut:#8fa1b8;
+    --buy:#22c55e; --sell:#ef4444; --wait:#f59e0b; --accent:#3b82f6;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
+       padding:max(16px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom));max-width:560px;margin:0 auto}
+  h1{font-size:20px;margin:6px 0 2px}
+  .sub{color:var(--mut);font-size:13px;margin-bottom:16px}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  label{display:block;font-size:12px;color:var(--mut);margin-bottom:4px}
+  select,input{width:100%;background:#0e1420;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:16px}
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
+  button{width:100%;background:var(--accent);color:#fff;border:0;border-radius:12px;padding:15px;font-size:17px;font-weight:700}
+  button:disabled{opacity:.6}
+  .verdict{text-align:center;padding:18px 10px}
+  .verdict .big{font-size:38px;font-weight:800;letter-spacing:1px}
+  .verdict .price{color:var(--mut);margin-top:4px;font-size:14px}
+  .BUY{color:var(--buy)} .SELL{color:var(--sell)} .WAIT{color:var(--wait)}
+  .meter{height:8px;background:#0e1420;border-radius:6px;margin:12px 0 4px;position:relative;overflow:hidden}
+  .meter i{position:absolute;top:0;bottom:0;width:4px;background:#fff;border-radius:2px;transform:translateX(-50%)}
+  .meter b{position:absolute;inset:0;background:linear-gradient(90deg,var(--sell),var(--wait) 50%,var(--buy));opacity:.55}
+  .small{font-size:12px;color:var(--mut)}
+  ul{list-style:none;margin:0;padding:0}
+  li{padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px;align-items:flex-start}
+  li:last-child{border-bottom:0}
+  .dot{flex:0 0 10px;height:10px;border-radius:50%;margin-top:5px}
+  .g{background:var(--buy)} .r{background:var(--sell)} .y{background:var(--wait)}
+  .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .kv{background:#0e1420;border:1px solid var(--line);border-radius:10px;padding:10px}
+  .kv span{display:block;font-size:11px;color:var(--mut)}
+  .kv strong{font-size:16px}
+  canvas{width:100%;height:150px;display:block}
+  .warn{font-size:12px;color:var(--mut);line-height:1.5}
+  .err{color:var(--sell);font-size:14px}
+  h2{font-size:14px;margin:0 0 8px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+</style>
+</head>
+<body>
+  <h1>📊 Trading Analyzer</h1>
+  <div class="sub">Crypto signal checker · para sa analysis lang, hindi financial advice</div>
+
+  <div class="card">
+    <div class="row">
+      <div>
+        <label>Coin</label>
+        <select id="symbol">
+          <option value="BTCUSDT">BTC / USDT</option>
+          <option value="ETHUSDT">ETH / USDT</option>
+          <option value="SOLUSDT">SOL / USDT</option>
+          <option value="BNBUSDT">BNB / USDT</option>
+          <option value="XRPUSDT">XRP / USDT</option>
+          <option value="DOGEUSDT">DOGE / USDT</option>
+          <option value="ADAUSDT">ADA / USDT</option>
+          <option value="AVAXUSDT">AVAX / USDT</option>
+          <option value="LINKUSDT">LINK / USDT</option>
+          <option value="TONUSDT">TON / USDT</option>
+        </select>
+      </div>
+      <div>
+        <label>Timeframe</label>
+        <select id="tf">
+          <option value="15m">15 minuto</option>
+          <option value="1h" selected>1 oras</option>
+          <option value="4h">4 oras</option>
+          <option value="1d">1 araw</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div>
+        <label>Budget (USDT)</label>
+        <input id="budget" type="number" inputmode="decimal" value="100" min="1">
+      </div>
+      <div>
+        <label>Risk per trade (%)</label>
+        <input id="risk" type="number" inputmode="decimal" value="1" min="0.1" step="0.1">
+      </div>
+    </div>
+    <button id="go">🔍 I-analyze</button>
+  </div>
+
+  <div id="out"></div>
+
+  <div class="card warn">
+    ⚠️ Hindi ito garantiya ng kita. Ang signal ay base lang sa technical indicators at maaaring mali. Huwag mag-trade ng pera na hindi mo kayang mawala. Gumamit ng stop-loss palagi.
+  </div>
+
+<script>
+/* ---------- Indicators ---------- */
+function ema(values, period){
+  const k = 2/(period+1), out = [];
+  let prev;
+  for(let i=0;i<values.length;i++){
+    if(i===0){ prev = values[0]; }
+    else { prev = values[i]*k + prev*(1-k); }
+    out.push(i < period-1 ? null : prev);
+  }
+  return out;
+}
+function rsi(closes, period=14){
+  if(closes.length <= period) return null;
+  let gain=0, loss=0;
+  for(let i=1;i<=period;i++){
+    const d = closes[i]-closes[i-1];
+    if(d>=0) gain+=d; else loss-=d;
+  }
+  gain/=period; loss/=period;
+  for(let i=period+1;i<closes.length;i++){
+    const d = closes[i]-closes[i-1];
+    gain = (gain*(period-1) + Math.max(d,0))/period;
+    loss = (loss*(period-1) + Math.max(-d,0))/period;
+  }
+  if(loss===0) return 100;
+  const rs = gain/loss;
+  return 100 - 100/(1+rs);
+}
+function macd(closes){
+  const e12 = ema(closes,12), e26 = ema(closes,26);
+  const line = closes.map((_,i)=> (e12[i]!=null && e26[i]!=null) ? e12[i]-e26[i] : null);
+  const valid = line.filter(v=>v!=null);
+  const sig = ema(valid,9);
+  const hist = valid.map((v,i)=> sig[i]!=null ? v-sig[i] : null);
+  return {line:valid, signal:sig, hist};
+}
+function atr(candles, period=14){
+  if(candles.length <= period) return null;
+  const tr = [];
+  for(let i=1;i<candles.length;i++){
+    const c=candles[i], p=candles[i-1];
+    tr.push(Math.max(c.h-c.l, Math.abs(c.h-p.c), Math.abs(c.l-p.c)));
+  }
+  let a = tr.slice(0,period).reduce((s,v)=>s+v,0)/period;
+  for(let i=period;i<tr.length;i++) a = (a*(period-1)+tr[i])/period;
+  return a;
+}
+
+/* ---------- Data ---------- */
+async function getJSON(url){
+  let timer;
+  const timeout = new Promise((_,rej)=>{ timer = setTimeout(()=>rej(new Error("timeout")), 8000); });
+  try{
+    const r = await Promise.race([fetch(url), timeout]);
+    if(!r.ok) throw new Error("HTTP "+r.status);
+    return await Promise.race([r.json(), timeout]);
+  }catch(e){
+    throw new Error(e.message==="Failed to fetch" ? "naka-block / walang koneksyon" : e.message);
+  }finally{ clearTimeout(timer); }
+}
+
+const SOURCES = [
+  { name:"Kraken", run: async (b,tf)=>{
+      const pair = (b==="BTC"?"XBT":b)+"USD";
+      const iv = {"15m":15,"1h":60,"4h":240,"1d":1440}[tf];
+      const j = await getJSON(`https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=${iv}`);
+      if(j.error && j.error.length) throw new Error(j.error[0]);
+      const key = Object.keys(j.result).find(k=>k!=="last");
+      return j.result[key].map(k=>({t:k[0]*1000,o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[6]})).slice(-300);
+  }},
+  { name:"Coinbase", run: async (b,tf)=>{
+      const gran = {"15m":900,"1h":3600,"4h":21600,"1d":86400}[tf];
+      const j = await getJSON(`https://api.exchange.coinbase.com/products/${b}-USD/candles?granularity=${gran}`);
+      return j.map(k=>({t:k[0]*1000,o:+k[3],h:+k[2],l:+k[1],c:+k[4],v:+k[5]})).reverse();
+  }},
+  { name:"OKX", run: async (b,tf)=>{
+      const bar = {"15m":"15m","1h":"1H","4h":"4H","1d":"1D"}[tf];
+      const j = await getJSON(`https://www.okx.com/api/v5/market/candles?instId=${b}-USDT&bar=${bar}&limit=300`);
+      if(!j.data || !j.data.length) throw new Error(j.msg||"walang data");
+      return j.data.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
+  }},
+  { name:"Bybit", run: async (b,tf)=>{
+      const iv = {"15m":"15","1h":"60","4h":"240","1d":"D"}[tf];
+      const j = await getJSON(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${b}USDT&interval=${iv}&limit=300`);
+      if(!j.result || !j.result.list || !j.result.list.length) throw new Error(j.retMsg||"walang data");
+      return j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
+  }},
+  { name:"KuCoin", run: async (b,tf)=>{
+      const type = {"15m":"15min","1h":"1hour","4h":"4hour","1d":"1day"}[tf];
+      const j = await getJSON(`https://api.kucoin.com/api/v1/market/candles?type=${type}&symbol=${b}-USDT`);
+      if(!j.data || !j.data.length) throw new Error(j.msg||"walang data");
+      return j.data.map(k=>({t:k[0]*1000,o:+k[1],c:+k[2],h:+k[3],l:+k[4],v:+k[5]})).reverse().slice(-300);
+  }},
+  { name:"Binance", run: async (b,tf)=>{
+      let last;
+      for(const h of ["https://data-api.binance.vision","https://api.binance.com"]){
+        try{
+          const j = await getJSON(`${h}/api/v3/klines?symbol=${b}USDT&interval=${tf}&limit=300`);
+          return j.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+        }catch(e){ last = e; }
+      }
+      throw last;
+  }}
+];
+
+async function fetchKlines(symbol, tf){
+  const base = symbol.replace("USDT","");
+  const errors = [];
+  const tries = SOURCES.map(s =>
+    s.run(base, tf).then(candles=>{
+      if(!candles || candles.length < 60) throw new Error("kulang ang data");
+      return {candles, source:s.name};
+    }).catch(e=>{ errors.push(s.name+": "+e.message); throw e; })
+  );
+  try{
+    return await Promise.any(tries);
+  }catch(_){
+    throw new Error("Lahat ng source ay pumalya.<br><span class='small'>"+errors.join("<br>")+"</span>");
+  }
+}
+
+/* ---------- Analysis ---------- */
+function analyze(candles){
+  const closes = candles.map(c=>c.c);
+  const price = closes[closes.length-1];
+  const e20 = ema(closes,20), e50 = ema(closes,50);
+  const E20 = e20[e20.length-1], E50 = e50[e50.length-1];
+  const R = rsi(closes,14);
+  const M = macd(closes);
+  const H = M.hist[M.hist.length-1], Hp = M.hist[M.hist.length-2];
+  const A = atr(candles,14);
+
+  const lastVol = candles[candles.length-1].v;
+  const avgVol = candles.slice(-21,-1).reduce((s,c)=>s+c.v,0)/20;
+  const volRatio = avgVol ? lastVol/avgVol : 1;
+  const lastC = candles[candles.length-1];
+  const green = lastC.c >= lastC.o;
+
+  let score = 0; const reasons = [];
+  const add = (pts, txt) => { score += pts; reasons.push({pts, txt}); };
+
+  if(E20 > E50) add(1, `EMA20 (${fmt(E20)}) nasa itaas ng EMA50 (${fmt(E50)}): uptrend`);
+  else add(-1, `EMA20 (${fmt(E20)}) nasa ibaba ng EMA50 (${fmt(E50)}): downtrend`);
+
+  if(price > E50) add(1, `Presyo nasa itaas ng EMA50: lakas ng buyers`);
+  else add(-1, `Presyo nasa ibaba ng EMA50: lakas ng sellers`);
+
+  if(R < 35) add(1, `RSI ${R.toFixed(1)}: oversold, posibleng bounce`);
+  else if(R > 65) add(-1, `RSI ${R.toFixed(1)}: overbought, posibleng pullback`);
+  else add(0, `RSI ${R.toFixed(1)}: neutral`);
+
+  if(H > 0 && H > Hp) add(1, `MACD histogram positibo at lumalakas`);
+  else if(H < 0 && H < Hp) add(-1, `MACD histogram negatibo at humihina`);
+  else if(H > 0) add(0, `MACD positibo pero humihina`);
+  else add(0, `MACD negatibo pero bumubuti`);
+
+  if(volRatio > 1.5){
+    if(green) add(1, `Mataas ang volume (${volRatio.toFixed(1)}x avg) sa green candle`);
+    else add(-1, `Mataas ang volume (${volRatio.toFixed(1)}x avg) sa red candle`);
+  } else add(0, `Normal ang volume (${volRatio.toFixed(1)}x avg)`);
+
+  let verdict = "WAIT";
+  if(score >= 3) verdict = "BUY";
+  else if(score <= -3) verdict = "SELL";
+
+  // Pigilan ang BUY kapag sobrang overbought
+  let note = "";
+  if(verdict==="BUY" && R > 75){ verdict="WAIT"; note="Overbought na masyado (RSI > 75), mas mainam maghintay ng pullback."; }
+  if(verdict==="SELL" && R < 25){ verdict="WAIT"; note="Oversold na masyado (RSI < 25), delikado mag-sell sa ibaba."; }
+
+  // Levels (long setup bilang reference). RR 1:2
+  const slDist = A*1.5;
+  const long = {entry:price, sl:price-slDist, tp:price+slDist*2};
+  const short = {entry:price, sl:price+slDist, tp:price-slDist*2};
+
+  return {price, E20, E50, R, H, A, volRatio, score, verdict, reasons, long, short, note, closes, e20, e50};
+}
+
+/* ---------- UI helpers ---------- */
+function fmt(n){
+  if(n==null || isNaN(n)) return "-";
+  const a = Math.abs(n);
+  const d = a>=1000?2 : a>=1?4 : 6;
+  return Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
+}
+const $ = id => document.getElementById(id);
+
+function drawChart(res){
+  const cv = document.getElementById("chart");
+  if(!cv) return;
+  const dpr = window.devicePixelRatio||1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr,dpr);
+  const n = 80;
+  const closes = res.closes.slice(-n), a = res.e20.slice(-n), b = res.e50.slice(-n);
+  const all = closes.concat(a.filter(v=>v!=null), b.filter(v=>v!=null));
+  const min = Math.min(...all), max = Math.max(...all), pad=6;
+  const X = i => pad + i*(w-2*pad)/(n-1);
+  const Y = v => h-pad - (v-min)/(max-min||1)*(h-2*pad);
+  const line = (arr,color,width)=>{
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=width;
+    let started=false;
+    arr.forEach((v,i)=>{ if(v==null) return; if(!started){ctx.moveTo(X(i),Y(v));started=true;} else ctx.lineTo(X(i),Y(v)); });
+    ctx.stroke();
+  };
+  line(b,"#f59e0b",1.5);
+  line(a,"#3b82f6",1.5);
+  line(closes,"#e8eef7",2);
+}
+
+function render(res, sym, tf){
+  const budget = parseFloat($("budget").value)||0;
+  const riskPct = parseFloat($("risk").value)||0;
+  const isShort = res.verdict==="SELL";
+  const lv = isShort ? res.short : res.long;
+  const riskAmt = budget*riskPct/100;
+  const dist = Math.abs(lv.entry-lv.sl);
+  let qty = dist>0 ? riskAmt/dist : 0;
+  let posValue = qty*lv.entry;
+  let capped = false;
+  if(posValue > budget){ posValue = budget; qty = budget/lv.entry; capped = true; }
+  const pctMove = dist/lv.entry*100;
+
+  const meterPos = ((res.score+5)/10)*100;
+  const label = {BUY:"BUY", SELL:"SELL / AVOID", WAIT:"WAIT"}[res.verdict];
+  const verdictTxt = {
+    BUY:"Maraming indicator ang pabor sa pagtaas.",
+    SELL:"Maraming indicator ang pabor sa pagbaba. Kung spot ka lang, mas mainam na iwasan muna ang pagbili.",
+    WAIT:"Halo-halo ang signals. Mas ligtas maghintay ng malinaw na setup."
+  }[res.verdict];
+
+  const dotClass = p => p>0?"g":p<0?"r":"y";
+  $("out").innerHTML = `
+    <div class="card verdict">
+      <div class="small">${sym.replace("USDT","")}/USDT · ${tf}</div>
+      <div class="big ${res.verdict}">${label}</div>
+      <div class="price">Presyo: $${fmt(res.price)}</div>
+      <div class="meter"><b></b><i style="left:${meterPos}%"></i></div>
+      <div class="small">Score: ${res.score>0?"+":""}${res.score} / 5</div>
+      <div style="margin-top:10px;font-size:14px">${verdictTxt}</div>
+      ${res.note?`<div style="margin-top:8px;font-size:13px;color:var(--wait)">${res.note}</div>`:""}
+    </div>
+
+    <div class="card">
+      <h2>Chart (huling 80 candles)</h2>
+      <canvas id="chart"></canvas>
+      <div class="small" style="margin-top:6px">⬜ Presyo · 🟦 EMA20 · 🟧 EMA50</div>
+    </div>
+
+    <div class="card">
+      <h2>Mga dahilan</h2>
+      <ul>${res.reasons.map(r=>`<li><span class="dot ${dotClass(r.pts)}"></span><span>${r.txt}</span></li>`).join("")}</ul>
+    </div>
+
+    <div class="card">
+      <h2>${isShort?"Reference levels (short)":"Reference levels (long)"}</h2>
+      <div class="grid">
+        <div class="kv"><span>Entry</span><strong>$${fmt(lv.entry)}</strong></div>
+        <div class="kv"><span>Stop-loss</span><strong style="color:var(--sell)">$${fmt(lv.sl)}</strong></div>
+        <div class="kv"><span>Take-profit (1:2)</span><strong style="color:var(--buy)">$${fmt(lv.tp)}</strong></div>
+        <div class="kv"><span>Layo ng SL</span><strong>${pctMove.toFixed(2)}%</strong></div>
+      </div>
+      <div class="small" style="margin-top:8px">Base sa ATR(14) × 1.5 para sa stop-loss. ${res.verdict==="WAIT"?"Para sa reference lang dahil WAIT ang signal.":""}</div>
+    </div>
+
+    <div class="card">
+      <h2>Position size</h2>
+      <div class="grid">
+        <div class="kv"><span>Max na malulugi (${riskPct}%)</span><strong>$${fmt(riskAmt)}</strong></div>
+        <div class="kv"><span>Laki ng posisyon</span><strong>$${fmt(posValue)}</strong></div>
+        <div class="kv"><span>Dami ng coin</span><strong>${fmt(qty)}</strong></div>
+        <div class="kv"><span>Kung abot TP</span><strong style="color:var(--buy)">+$${fmt(qty*dist*2)}</strong></div>
+      </div>
+      ${capped?`<div class="small" style="margin-top:8px">Na-cap sa budget mo. Mas mababa ang aktwal na risk kaysa ${riskPct}%.</div>`:""}
+    </div>
+
+    <div class="card">
+      <h2>Indicators</h2>
+      <div class="grid">
+        <div class="kv"><span>RSI(14)</span><strong>${res.R.toFixed(1)}</strong></div>
+        <div class="kv"><span>MACD hist</span><strong>${fmt(res.H)}</strong></div>
+        <div class="kv"><span>EMA20</span><strong>${fmt(res.E20)}</strong></div>
+        <div class="kv"><span>EMA50</span><strong>${fmt(res.E50)}</strong></div>
+        <div class="kv"><span>ATR(14)</span><strong>${fmt(res.A)}</strong></div>
+        <div class="kv"><span>Volume vs avg</span><strong>${res.volRatio.toFixed(2)}x</strong></div>
+      </div>
+    </div>
+    <div class="small" style="text-align:center;margin-bottom:12px">Source: ${res.source} · huling candle: ${new Date(res.lastT).toLocaleString()}<br>Na-update: ${new Date().toLocaleTimeString()}${res.source==="Coinbase"&&tf==="4h"?"<br>(Coinbase: 6h candles ang gamit sa 4h)":""}</div>
+  `;
+  drawChart(res);
+}
+
+/* ---------- Events ---------- */
+function save(){
+  try{
+    localStorage.setItem("ta", JSON.stringify({
+      s:$("symbol").value, t:$("tf").value, b:$("budget").value, r:$("risk").value
+    }));
+  }catch(e){}
+}
+function load(){
+  try{
+    const d = JSON.parse(localStorage.getItem("ta")||"null");
+    if(!d) return;
+    $("symbol").value = d.s; $("tf").value = d.t; $("budget").value = d.b; $("risk").value = d.r;
+  }catch(e){}
+}
+
+$("go").addEventListener("click", async ()=>{
+  const btn = $("go");
+  const sym = $("symbol").value, tf = $("tf").value;
+  save();
+  btn.disabled = true; btn.textContent = "Kinukuha ang data...";
+  $("out").innerHTML = "";
+  try{
+    const {candles, source} = await fetchKlines(sym, tf);
+    const res = analyze(candles);
+    res.source = source;
+    res.lastT = candles[candles.length-1].t;
+    render(res, sym, tf);
+  }catch(e){
+    $("out").innerHTML = `<div class="card err">Hindi makuha ang data: ${e.message}<br><br><span class="small">I-check ang internet mo, o subukang gumamit ng ibang network (WiFi/mobile data) o i-off ang VPN kung meron.</span></div>`;
+  }finally{
+    btn.disabled = false; btn.textContent = "🔍 I-analyze";
+  }
+});
+window.addEventListener("resize", ()=>{});
+load();
+</script>
+</body>
+</html>
