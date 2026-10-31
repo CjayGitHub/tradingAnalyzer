@@ -5,235 +5,147 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-title" content="Trading Helper">
+<meta name="apple-mobile-web-app-title" content="Analyzer">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="theme-color" content="#0b0f17">
-<title>Trading Helper</title>
+<title>Trading Analyzer</title>
 <style>
   :root{
-    --bg:#0b0f17; --card:#141b27; --line:#223046; --text:#e8eef7; --mut:#93a4bc;
+    --bg:#0b0f17; --card:#141b27; --line:#223046; --text:#e8eef7; --mut:#8fa1b8;
     --buy:#22c55e; --sell:#ef4444; --wait:#f59e0b; --accent:#3b82f6;
   }
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   body{margin:0;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;
-       padding:max(16px,env(safe-area-inset-top)) 16px max(28px,env(safe-area-inset-bottom));max-width:560px;margin:0 auto;line-height:1.45}
-  h1{font-size:22px;margin:6px 0 2px}
-  h2{font-size:15px;margin:0 0 10px}
+       padding:max(16px,env(safe-area-inset-top)) 16px max(24px,env(safe-area-inset-bottom));max-width:560px;margin:0 auto}
+  h1{font-size:20px;margin:6px 0 2px}
   .sub{color:var(--mut);font-size:13px;margin-bottom:16px}
   .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
-  label{display:block;font-size:13px;color:var(--mut);margin-bottom:4px}
-  select,input[type=number]{width:100%;background:#0e1420;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:16px}
+  label{display:block;font-size:12px;color:var(--mut);margin-bottom:4px}
+  select,input{width:100%;background:#0e1420;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:16px}
   .row{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:10px}
-  .check{display:flex;gap:10px;align-items:center;font-size:15px;color:var(--text);margin:4px 0 12px}
-  .check input{width:22px;height:22px}
-  button{font:inherit}
-  .main{width:100%;background:var(--accent);color:#fff;border:0;border-radius:12px;padding:15px;font-size:18px;font-weight:700}
-  .main:disabled{opacity:.6}
-  .alt{width:100%;background:transparent;color:var(--accent);border:1px solid var(--accent);border-radius:12px;padding:13px;font-size:16px;font-weight:600;margin-top:10px}
-  .alt:disabled{opacity:.6}
+  button{width:100%;background:var(--accent);color:#fff;border:0;border-radius:12px;padding:15px;font-size:17px;font-weight:700}
+  button:disabled{opacity:.6}
+  .verdict{text-align:center;padding:18px 10px}
+  .verdict .big{font-size:38px;font-weight:800;letter-spacing:1px}
+  .verdict .price{color:var(--mut);margin-top:4px;font-size:14px}
+  .BUY{color:var(--buy)} .SELL{color:var(--sell)} .WAIT{color:var(--wait)}
+  .meter{height:8px;background:#0e1420;border-radius:6px;margin:12px 0 4px;position:relative;overflow:hidden}
+  .meter i{position:absolute;top:0;bottom:0;width:4px;background:#fff;border-radius:2px;transform:translateX(-50%)}
+  .meter b{position:absolute;inset:0;background:linear-gradient(90deg,var(--sell),var(--wait) 50%,var(--buy));opacity:.55}
   .small{font-size:12px;color:var(--mut)}
-  .verdict{text-align:center;padding:20px 12px}
-  .verdict .big{font-size:30px;font-weight:800;line-height:1.15}
-  .verdict .sentence{margin-top:8px;font-size:15px}
-  .verdict .price{color:var(--mut);margin-top:8px;font-size:14px}
-  .GREEN{color:var(--buy)} .RED{color:var(--sell)} .YELLOW{color:var(--wait)}
-  .chip{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 12px;font-size:13px;margin-top:10px}
+  ul{list-style:none;margin:0;padding:0}
+  li{padding:9px 0;border-bottom:1px solid var(--line);font-size:14px;display:flex;gap:10px;align-items:flex-start}
+  li:last-child{border-bottom:0}
+  .dot{flex:0 0 10px;height:10px;border-radius:50%;margin-top:5px}
+  .g{background:var(--buy)} .r{background:var(--sell)} .y{background:var(--wait)}
   .grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .kv{background:#0e1420;border:1px solid var(--line);border-radius:10px;padding:10px}
-  .kv span{display:block;font-size:12px;color:var(--mut)}
-  .kv strong{font-size:17px}
-  .q{background:#0e1420;color:var(--accent);border:1px solid var(--line);border-radius:50%;width:20px;height:20px;font-size:12px;line-height:1;padding:0;margin-left:4px;vertical-align:middle}
-  .hint{background:#0e1420;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:13px;margin-top:8px;color:var(--text)}
-  ul.why{list-style:none;margin:0;padding:0}
-  ul.why li{padding:8px 0;border-bottom:1px solid var(--line);font-size:15px}
-  ul.why li:last-child{border-bottom:0}
+  .kv span{display:block;font-size:11px;color:var(--mut)}
+  .kv strong{font-size:16px}
+  canvas{width:100%;height:150px;display:block}
+  .warn{font-size:12px;color:var(--mut);line-height:1.5}
   .err{color:var(--sell);font-size:14px}
-  .notice{background:#1b2a1f;border:1px solid #1f5a33;border-radius:12px;padding:12px;margin-bottom:12px;font-size:14px}
-  .trade{border-top:1px solid var(--line);padding:12px 0}
-  .trade:first-of-type{border-top:0}
-  .trade .top{display:flex;justify-content:space-between;align-items:center;gap:8px;font-weight:700}
-  .tag{font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;border:1px solid var(--line)}
-  .del{background:transparent;color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;margin-top:8px}
-  .bt-big{font-size:20px;font-weight:800;margin-bottom:6px}
+  h2{font-size:14px;margin:0 0 8px;color:var(--mut);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 </style>
 </head>
 <body>
-  <h1>📈 Trading Helper</h1>
-  <div class="sub">Gabay para sa baguhan · Hindi ito garantiya ng kita</div>
-
-  <div id="notice"></div>
+  <h1>📊 Trading Analyzer</h1>
+  <div class="sub">Crypto signal checker · para sa analysis lang, hindi financial advice</div>
 
   <div class="card">
     <div class="row">
       <div>
-        <label for="coin">Coin</label>
-        <select id="coin">
-          <option value="BTC">Bitcoin (BTC)</option>
-          <option value="ETH">Ethereum (ETH)</option>
-          <option value="SOL">Solana (SOL)</option>
-          <option value="BNB">BNB</option>
-          <option value="XRP">XRP</option>
-          <option value="DOGE">Dogecoin (DOGE)</option>
-          <option value="ADA">Cardano (ADA)</option>
-          <option value="AVAX">Avalanche (AVAX)</option>
-          <option value="LINK">Chainlink (LINK)</option>
-          <option value="TON">Toncoin (TON)</option>
+        <label>Coin</label>
+        <select id="symbol">
+          <option value="BTCUSDT">BTC / USDT</option>
+          <option value="ETHUSDT">ETH / USDT</option>
+          <option value="SOLUSDT">SOL / USDT</option>
+          <option value="BNBUSDT">BNB / USDT</option>
+          <option value="XRPUSDT">XRP / USDT</option>
+          <option value="DOGEUSDT">DOGE / USDT</option>
+          <option value="ADAUSDT">ADA / USDT</option>
+          <option value="AVAXUSDT">AVAX / USDT</option>
+          <option value="LINKUSDT">LINK / USDT</option>
+          <option value="TONUSDT">TON / USDT</option>
         </select>
       </div>
       <div>
-        <label for="tf">Timeframe</label>
+        <label>Timeframe</label>
         <select id="tf">
-          <option value="1h">1 oras</option>
-          <option value="4h" selected>4 na oras</option>
+          <option value="15m">15 minuto</option>
+          <option value="1h" selected>1 oras</option>
+          <option value="4h">4 oras</option>
           <option value="1d">1 araw</option>
         </select>
       </div>
     </div>
-    <label for="budget">Budget mo (USD)</label>
-    <input id="budget" type="number" inputmode="decimal" value="100" min="1" style="margin-bottom:12px">
-    <label class="check"><input id="hold" type="checkbox"> May hawak na ako nito</label>
-    <button class="main" id="go">I-check</button>
+    <div class="row">
+      <div>
+        <label>Budget (USDT)</label>
+        <input id="budget" type="number" inputmode="decimal" value="100" min="1">
+      </div>
+      <div>
+        <label>Risk per trade (%)</label>
+        <input id="risk" type="number" inputmode="decimal" value="1" min="0.1" step="0.1">
+      </div>
+    </div>
+    <button id="go">🔍 I-analyze</button>
   </div>
 
   <div id="out"></div>
 
-  <div class="card" id="journalCard">
-    <h2>📒 Mga Trade Ko</h2>
-    <div id="journal"></div>
-    <button class="alt" id="refresh">I-refresh ang mga trade</button>
-  </div>
-
-  <div class="card small">
-    ⚠️ Walang strategy na sigurado ang kita. Gamitin lang ang pera na kaya mong mawala, at palaging maglagay ng stop-loss. Gumagana lang ang mga babala kapag binuksan mo ang app.
+  <div class="card warn">
+    ⚠️ Hindi ito garantiya ng kita. Ang signal ay base lang sa technical indicators at maaaring mali. Huwag mag-trade ng pera na hindi mo kayang mawala. Gumamit ng stop-loss palagi.
   </div>
 
 <script>
-/* ================= PURE START ================= */
-function emaS(values, period){
-  const out = new Array(values.length).fill(null);
-  if(values.length < period) return out;
-  let sum = 0;
-  for(let i=0;i<period;i++) sum += values[i];
-  let prev = sum/period;
-  out[period-1] = prev;
-  const k = 2/(period+1);
-  for(let i=period;i<values.length;i++){
-    prev = values[i]*k + prev*(1-k);
-    out[i] = prev;
+/* ---------- Indicators ---------- */
+function ema(values, period){
+  const k = 2/(period+1), out = [];
+  let prev;
+  for(let i=0;i<values.length;i++){
+    if(i===0){ prev = values[0]; }
+    else { prev = values[i]*k + prev*(1-k); }
+    out.push(i < period-1 ? null : prev);
   }
   return out;
 }
-function rsiS(closes, period){
-  const out = new Array(closes.length).fill(null);
-  if(closes.length <= period) return out;
+function rsi(closes, period=14){
+  if(closes.length <= period) return null;
   let gain=0, loss=0;
   for(let i=1;i<=period;i++){
     const d = closes[i]-closes[i-1];
     if(d>=0) gain+=d; else loss-=d;
   }
   gain/=period; loss/=period;
-  out[period] = loss===0 ? 100 : 100-100/(1+gain/loss);
   for(let i=period+1;i<closes.length;i++){
     const d = closes[i]-closes[i-1];
     gain = (gain*(period-1) + Math.max(d,0))/period;
     loss = (loss*(period-1) + Math.max(-d,0))/period;
-    out[i] = loss===0 ? 100 : 100-100/(1+gain/loss);
   }
-  return out;
+  if(loss===0) return 100;
+  const rs = gain/loss;
+  return 100 - 100/(1+rs);
 }
-function atrS(cs, period){
-  const out = new Array(cs.length).fill(null);
-  if(cs.length <= period) return out;
-  const tr = [0];
-  for(let i=1;i<cs.length;i++){
-    const c=cs[i], p=cs[i-1];
+function macd(closes){
+  const e12 = ema(closes,12), e26 = ema(closes,26);
+  const line = closes.map((_,i)=> (e12[i]!=null && e26[i]!=null) ? e12[i]-e26[i] : null);
+  const valid = line.filter(v=>v!=null);
+  const sig = ema(valid,9);
+  const hist = valid.map((v,i)=> sig[i]!=null ? v-sig[i] : null);
+  return {line:valid, signal:sig, hist};
+}
+function atr(candles, period=14){
+  if(candles.length <= period) return null;
+  const tr = [];
+  for(let i=1;i<candles.length;i++){
+    const c=candles[i], p=candles[i-1];
     tr.push(Math.max(c.h-c.l, Math.abs(c.h-p.c), Math.abs(c.l-p.c)));
   }
-  let a = 0;
-  for(let i=1;i<=period;i++) a += tr[i];
-  a /= period;
-  out[period] = a;
-  for(let i=period+1;i<cs.length;i++){
-    a = (a*(period-1)+tr[i])/period;
-    out[i] = a;
-  }
-  return out;
+  let a = tr.slice(0,period).reduce((s,v)=>s+v,0)/period;
+  for(let i=period;i<tr.length;i++) a = (a*(period-1)+tr[i])/period;
+  return a;
 }
-function prep(cs){
-  const closes = cs.map(c=>c.c);
-  return {cs, closes, e20:emaS(closes,20), e50:emaS(closes,50), e200:emaS(closes,200), rsi:rsiS(closes,14), atr:atrS(cs,14)};
-}
-
-/* Strategy: bumili sa pullback habang paakyat ang trend */
-function evalAt(P, i){
-  const cs=P.cs, close=P.closes[i], c=cs[i];
-  const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
-  const up   = close>e50 && e50>e200 && e50>P.e50[i-5];
-  const down = close<e50 && e50<e200;
-  let lowMin=Infinity, rsiMin=100;
-  for(let k=i-7;k<=i;k++){ lowMin=Math.min(lowMin, cs[k].l); rsiMin=Math.min(rsiMin, P.rsi[k]); }
-  const touched    = lowMin <= e20*1.002;
-  const recovering = rsiMin<=45 && rsi>P.rsi[i-1] && rsi>=45 && rsi<=65;
-  const bullish    = c.c>c.o && close>e20;
-  const extended   = rsi>=70 || (close-e20) > 2*atr;
-  const buy = up && touched && recovering && bullish && !extended;
-  return {up, down, touched, recovering, bullish, extended, buy, e20, e50, e200, rsi, atr};
-}
-function levelsAt(P, i, entry){
-  const atr = P.atr[i];
-  let swing = Infinity;
-  for(let k=i-9;k<=i;k++) swing = Math.min(swing, P.cs[k].l);
-  let sl = Math.min(swing, entry-1.5*atr);
-  sl = Math.max(sl, entry-3*atr);
-  if(!(sl < entry)) sl = entry-1.5*atr;
-  const tp = entry + 2*(entry-sl);
-  return {sl, tp};
-}
-function decide(e, hold){
-  if(!hold){
-    if(e.buy) return "BUY";
-    if(e.down) return "AVOID";
-    return "WAIT";
-  }
-  if(e.down) return "SELL";
-  if(e.up) return "HOLD";
-  return "WATCH";
-}
-function backtest(cs, budget){
-  const P = prep(cs);
-  const trades = [];
-  const FEE = 0.001;
-  let i = 200;
-  while(i < cs.length-2){
-    const e = evalAt(P, i);
-    if(!e.buy){ i++; continue; }
-    const entry = cs[i+1].o;
-    const lv = levelsAt(P, i, entry);
-    const risk = entry - lv.sl;
-    let R=null, exitPrice=null, j=i+1;
-    const last = Math.min(i+100, cs.length-1);
-    for(; j<=last; j++){
-      const c = cs[j];
-      if(c.l <= lv.sl){ R=-1; exitPrice=lv.sl; break; }
-      if(c.h >= lv.tp){ R=2;  exitPrice=lv.tp; break; }
-    }
-    if(R===null){
-      if(i+100 > cs.length-1) break;            // bukas pa ang trade pagdating ng dulo ng data
-      exitPrice = cs[i+100].c;
-      R = (exitPrice-entry)/risk;
-      j = i+100;
-    }
-    R -= (entry*FEE + exitPrice*FEE)/risk;
-    trades.push({R});
-    i = j+1;
-  }
-  const n = trades.length;
-  const wins = trades.filter(t=>t.R>0).length;
-  const totalR = trades.reduce((s,t)=>s+t.R,0);
-  const days = Math.max(1, Math.round((cs[cs.length-1].t - cs[200].t)/86400000));
-  return {n, wins, losses:n-wins, winRate: n? wins/n*100 : 0, totalR, money: totalR*budget*0.01, days};
-}
-/* ================= PURE END ================= */
 
 /* ---------- Data ---------- */
 async function getJSON(url){
@@ -247,43 +159,44 @@ async function getJSON(url){
     throw new Error(e.message==="Failed to fetch" ? "naka-block / walang koneksyon" : e.message);
   }finally{ clearTimeout(timer); }
 }
+
 const SOURCES = [
   { name:"Kraken", run: async (b,tf)=>{
       const pair = (b==="BTC"?"XBT":b)+"USD";
-      const iv = {"1h":60,"4h":240,"1d":1440}[tf];
+      const iv = {"15m":15,"1h":60,"4h":240,"1d":1440}[tf];
       const j = await getJSON(`https://api.kraken.com/0/public/OHLC?pair=${pair}&interval=${iv}`);
       if(j.error && j.error.length) throw new Error(j.error[0]);
       const key = Object.keys(j.result).find(k=>k!=="last");
-      return j.result[key].map(k=>({t:k[0]*1000,o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[6]}));
+      return j.result[key].map(k=>({t:k[0]*1000,o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[6]})).slice(-300);
   }},
   { name:"Coinbase", run: async (b,tf)=>{
-      const gran = {"1h":3600,"4h":21600,"1d":86400}[tf];
+      const gran = {"15m":900,"1h":3600,"4h":21600,"1d":86400}[tf];
       const j = await getJSON(`https://api.exchange.coinbase.com/products/${b}-USD/candles?granularity=${gran}`);
       return j.map(k=>({t:k[0]*1000,o:+k[3],h:+k[2],l:+k[1],c:+k[4],v:+k[5]})).reverse();
   }},
   { name:"OKX", run: async (b,tf)=>{
-      const bar = {"1h":"1H","4h":"4H","1d":"1D"}[tf];
+      const bar = {"15m":"15m","1h":"1H","4h":"4H","1d":"1D"}[tf];
       const j = await getJSON(`https://www.okx.com/api/v5/market/candles?instId=${b}-USDT&bar=${bar}&limit=300`);
       if(!j.data || !j.data.length) throw new Error(j.msg||"walang data");
       return j.data.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
   }},
   { name:"Bybit", run: async (b,tf)=>{
-      const iv = {"1h":"60","4h":"240","1d":"D"}[tf];
-      const j = await getJSON(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${b}USDT&interval=${iv}&limit=1000`);
+      const iv = {"15m":"15","1h":"60","4h":"240","1d":"D"}[tf];
+      const j = await getJSON(`https://api.bybit.com/v5/market/kline?category=spot&symbol=${b}USDT&interval=${iv}&limit=300`);
       if(!j.result || !j.result.list || !j.result.list.length) throw new Error(j.retMsg||"walang data");
       return j.result.list.map(k=>({t:+k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]})).reverse();
   }},
   { name:"KuCoin", run: async (b,tf)=>{
-      const type = {"1h":"1hour","4h":"4hour","1d":"1day"}[tf];
+      const type = {"15m":"15min","1h":"1hour","4h":"4hour","1d":"1day"}[tf];
       const j = await getJSON(`https://api.kucoin.com/api/v1/market/candles?type=${type}&symbol=${b}-USDT`);
       if(!j.data || !j.data.length) throw new Error(j.msg||"walang data");
-      return j.data.map(k=>({t:k[0]*1000,o:+k[1],c:+k[2],h:+k[3],l:+k[4],v:+k[5]})).reverse();
+      return j.data.map(k=>({t:k[0]*1000,o:+k[1],c:+k[2],h:+k[3],l:+k[4],v:+k[5]})).reverse().slice(-300);
   }},
   { name:"Binance", run: async (b,tf)=>{
       let last;
       for(const h of ["https://data-api.binance.vision","https://api.binance.com"]){
         try{
-          const j = await getJSON(`${h}/api/v3/klines?symbol=${b}USDT&interval=${tf}&limit=1000`);
+          const j = await getJSON(`${h}/api/v3/klines?symbol=${b}USDT&interval=${tf}&limit=300`);
           return j.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
         }catch(e){ last = e; }
       }
@@ -291,351 +204,230 @@ const SOURCES = [
   }}
 ];
 
-/* Sabay-sabay ang try; kapag may unang sumagot, maghihintay ng saglit
-   at kukunin ang source na pinakamarami ang data. */
-function fetchKlines(base, tf){
-  return new Promise((resolve, reject)=>{
-    const results = [], errors = [];
-    let pending = SOURCES.length, timer = null;
-    const finish = ()=>{
-      clearTimeout(timer);
-      results.sort((a,b)=>b.candles.length-a.candles.length);
-      resolve(results[0]);
-    };
-    SOURCES.forEach(s=>{
-      s.run(base, tf).then(candles=>{
-        if(!candles || candles.length < 230) throw new Error("kulang ang data");
-        results.push({candles, source:s.name});
-        if(!timer) timer = setTimeout(finish, 1200);
-      }).catch(e=>{
-        errors.push(s.name+": "+e.message);
-      }).finally(()=>{
-        pending--;
-        if(pending===0){
-          if(results.length) finish();
-          else reject(new Error("Walang makuhang data.<br><span class='small'>"+errors.join("<br>")+"</span>"));
-        }
-      });
-    });
-  });
+async function fetchKlines(symbol, tf){
+  const base = symbol.replace("USDT","");
+  const errors = [];
+  const tries = SOURCES.map(s =>
+    s.run(base, tf).then(candles=>{
+      if(!candles || candles.length < 60) throw new Error("kulang ang data");
+      return {candles, source:s.name};
+    }).catch(e=>{ errors.push(s.name+": "+e.message); throw e; })
+  );
+  try{
+    return await Promise.any(tries);
+  }catch(_){
+    throw new Error("Lahat ng source ay pumalya.<br><span class='small'>"+errors.join("<br>")+"</span>");
+  }
 }
 
-/* ---------- Helpers ---------- */
-const $ = id => document.getElementById(id);
+/* ---------- Analysis ---------- */
+function analyze(candles){
+  const closes = candles.map(c=>c.c);
+  const price = closes[closes.length-1];
+  const e20 = ema(closes,20), e50 = ema(closes,50);
+  const E20 = e20[e20.length-1], E50 = e50[e50.length-1];
+  const R = rsi(closes,14);
+  const M = macd(closes);
+  const H = M.hist[M.hist.length-1], Hp = M.hist[M.hist.length-2];
+  const A = atr(candles,14);
+
+  const lastVol = candles[candles.length-1].v;
+  const avgVol = candles.slice(-21,-1).reduce((s,c)=>s+c.v,0)/20;
+  const volRatio = avgVol ? lastVol/avgVol : 1;
+  const lastC = candles[candles.length-1];
+  const green = lastC.c >= lastC.o;
+
+  let score = 0; const reasons = [];
+  const add = (pts, txt) => { score += pts; reasons.push({pts, txt}); };
+
+  if(E20 > E50) add(1, `EMA20 (${fmt(E20)}) nasa itaas ng EMA50 (${fmt(E50)}): uptrend`);
+  else add(-1, `EMA20 (${fmt(E20)}) nasa ibaba ng EMA50 (${fmt(E50)}): downtrend`);
+
+  if(price > E50) add(1, `Presyo nasa itaas ng EMA50: lakas ng buyers`);
+  else add(-1, `Presyo nasa ibaba ng EMA50: lakas ng sellers`);
+
+  if(R < 35) add(1, `RSI ${R.toFixed(1)}: oversold, posibleng bounce`);
+  else if(R > 65) add(-1, `RSI ${R.toFixed(1)}: overbought, posibleng pullback`);
+  else add(0, `RSI ${R.toFixed(1)}: neutral`);
+
+  if(H > 0 && H > Hp) add(1, `MACD histogram positibo at lumalakas`);
+  else if(H < 0 && H < Hp) add(-1, `MACD histogram negatibo at humihina`);
+  else if(H > 0) add(0, `MACD positibo pero humihina`);
+  else add(0, `MACD negatibo pero bumubuti`);
+
+  if(volRatio > 1.5){
+    if(green) add(1, `Mataas ang volume (${volRatio.toFixed(1)}x avg) sa green candle`);
+    else add(-1, `Mataas ang volume (${volRatio.toFixed(1)}x avg) sa red candle`);
+  } else add(0, `Normal ang volume (${volRatio.toFixed(1)}x avg)`);
+
+  let verdict = "WAIT";
+  if(score >= 3) verdict = "BUY";
+  else if(score <= -3) verdict = "SELL";
+
+  // Pigilan ang BUY kapag sobrang overbought
+  let note = "";
+  if(verdict==="BUY" && R > 75){ verdict="WAIT"; note="Overbought na masyado (RSI > 75), mas mainam maghintay ng pullback."; }
+  if(verdict==="SELL" && R < 25){ verdict="WAIT"; note="Oversold na masyado (RSI < 25), delikado mag-sell sa ibaba."; }
+
+  // Levels (long setup bilang reference). RR 1:2
+  const slDist = A*1.5;
+  const long = {entry:price, sl:price-slDist, tp:price+slDist*2};
+  const short = {entry:price, sl:price+slDist, tp:price-slDist*2};
+
+  return {price, E20, E50, R, H, A, volRatio, score, verdict, reasons, long, short, note, closes, e20, e50};
+}
+
+/* ---------- UI helpers ---------- */
 function fmt(n){
   if(n==null || isNaN(n)) return "-";
   const a = Math.abs(n);
   const d = a>=1000?2 : a>=1?4 : 6;
   return Number(n).toLocaleString("en-US",{maximumFractionDigits:d});
 }
-function money(n){
-  const s = Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
-  return (n<0?"-":"")+"$"+s;
-}
-const COINS = ["BTC","ETH","SOL","BNB","XRP","DOGE","ADA","AVAX","LINK","TON"];
-const TF_LABEL = {"1h":"1 oras","4h":"4 na oras","1d":"1 araw"};
-const HINTS = {
-  trend:"Ang trend ay ang direksyon ng presyo sa mas mahabang panahon. Mas mataas ang tsansa kapag sumasabay ka sa paakyat na trend.",
-  sl:"Ito ang presyong lalabas ka kapag bumaba ang coin, para hindi lumaki ang lugi. Ilagay ito bilang order sa exchange mo.",
-  tp:"Ito ang presyong lalabas ka kapag tumaas ang coin, para makuha mo ang kita.",
-  qty:"Kinalkula ito para 1% lang ng budget mo ang pwedeng mawala kung tumama ang presyo sa stop-loss."
-};
-function help(key){
-  return `<button class="q" data-h="${key}" aria-label="Paliwanag">?</button>`;
-}
+const $ = id => document.getElementById(id);
 
-/* ---------- State ---------- */
-let state = null;
-
-/* ---------- Check ---------- */
-function reasonsFor(verdict, e, levelPrice){
-  if(verdict==="BUY") return [
-    "Paakyat ang trend ng coin.",
-    "Bumaba nang konti ang presyo, magandang pasok.",
-    "Bumabalik na ang lakas ng mga bumibili."
-  ];
-  if(verdict==="AVOID") return [
-    "Pababa ang trend ng coin.",
-    "Madalas na bumababa pa ito, kaya huwag munang bumili."
-  ];
-  if(verdict==="SELL") return [
-    "Pababa na ang trend ng coin.",
-    "Mas mabuting ibenta bago lumaki ang lugi."
-  ];
-  if(verdict==="HOLD") return [
-    "Paakyat pa rin ang trend ng coin.",
-    "Hawakan hangga't hindi bumababa sa $"+fmt(levelPrice)+"."
-  ];
-  if(verdict==="WATCH") return [
-    "Walang malinaw na direksyon ang presyo.",
-    "Bantayan. Kung bumaba sa $"+fmt(levelPrice)+", magandang magbenta na."
-  ];
-  // WAIT
-  if(e.up && e.extended) return [
-    "Paakyat ang trend, pero tumaas na nang malaki.",
-    "Huwag humabol. Hintayin ang konting pagbaba."
-  ];
-  if(e.up && !e.touched) return [
-    "Paakyat ang trend.",
-    "Hindi pa bumababa ang presyo para sa magandang pasok."
-  ];
-  if(e.up) return [
-    "Paakyat ang trend at bumaba na ang presyo.",
-    "Hindi pa bumabalik ang lakas ng mga bumibili. Hintayin ang berdeng candle."
-  ];
-  return [
-    "Walang malinaw na direksyon ang presyo.",
-    "Mas ligtas na maghintay."
-  ];
+function drawChart(res){
+  const cv = document.getElementById("chart");
+  if(!cv) return;
+  const dpr = window.devicePixelRatio||1;
+  const w = cv.clientWidth, h = cv.clientHeight;
+  cv.width = w*dpr; cv.height = h*dpr;
+  const ctx = cv.getContext("2d"); ctx.scale(dpr,dpr);
+  const n = 80;
+  const closes = res.closes.slice(-n), a = res.e20.slice(-n), b = res.e50.slice(-n);
+  const all = closes.concat(a.filter(v=>v!=null), b.filter(v=>v!=null));
+  const min = Math.min(...all), max = Math.max(...all), pad=6;
+  const X = i => pad + i*(w-2*pad)/(n-1);
+  const Y = v => h-pad - (v-min)/(max-min||1)*(h-2*pad);
+  const line = (arr,color,width)=>{
+    ctx.beginPath(); ctx.strokeStyle=color; ctx.lineWidth=width;
+    let started=false;
+    arr.forEach((v,i)=>{ if(v==null) return; if(!started){ctx.moveTo(X(i),Y(v));started=true;} else ctx.lineTo(X(i),Y(v)); });
+    ctx.stroke();
+  };
+  line(b,"#f59e0b",1.5);
+  line(a,"#3b82f6",1.5);
+  line(closes,"#e8eef7",2);
 }
 
-async function runCheck(){
-  const coin = $("coin").value, tf = $("tf").value;
-  const budget = parseFloat($("budget").value);
-  const hold = $("hold").checked;
-  const btn = $("go");
-  if(!(budget > 0)){
-    $("out").innerHTML = `<div class="card err">Maglagay ng budget na higit sa 0.</div>`;
-    return;
-  }
-  saveSettings();
-  btn.disabled = true; btn.textContent = "Kinukuha ang data...";
-  $("out").innerHTML = "";
-  try{
-    const {candles, source} = await fetchKlines(coin, tf);
-    const price = candles[candles.length-1].c;
-    const closed = candles.slice(0,-1);          // ang huling candle ay hindi pa tapos
-    const P = prep(closed);
-    const i = closed.length-1;
-    const e = evalAt(P, i);
-    const verdict = decide(e, hold);
-    state = {coin, tf, closed, budget};
-    renderResult({coin, tf, budget, source, price, e, verdict, P, i, lastT: candles[candles.length-1].t});
-  }catch(err){
-    $("out").innerHTML = `<div class="card err">Hindi makuha ang data: ${err.message}<br><br><span class="small">Subukang lumipat sa ibang network (WiFi o mobile data) o i-off ang VPN.</span></div>`;
-  }finally{
-    btn.disabled = false; btn.textContent = "I-check";
-  }
-}
+function render(res, sym, tf){
+  const budget = parseFloat($("budget").value)||0;
+  const riskPct = parseFloat($("risk").value)||0;
+  const isShort = res.verdict==="SELL";
+  const lv = isShort ? res.short : res.long;
+  const riskAmt = budget*riskPct/100;
+  const dist = Math.abs(lv.entry-lv.sl);
+  let qty = dist>0 ? riskAmt/dist : 0;
+  let posValue = qty*lv.entry;
+  let capped = false;
+  if(posValue > budget){ posValue = budget; qty = budget/lv.entry; capped = true; }
+  const pctMove = dist/lv.entry*100;
 
-function renderResult(r){
-  const {coin, tf, budget, source, price, e, verdict, P, i} = r;
-  const V = {
-    BUY:  {t:"🟢 PWEDENG BUMILI",     c:"GREEN",  s:"Maganda ang setup ngayon."},
-    WAIT: {t:"🟡 MAGHINTAY MUNA",     c:"YELLOW", s:"Wala pang magandang pasok."},
-    AVOID:{t:"🔴 HUWAG MUNANG BUMILI",c:"RED",    s:"Hindi maganda ang kalagayan ngayon."},
-    SELL: {t:"🔴 MAGBENTA NA",        c:"RED",    s:"Sira na ang trend, mag-ingat."},
-    HOLD: {t:"🟢 HAWAKAN MUNA",       c:"GREEN",  s:"Maayos pa ang takbo ng coin."},
-    WATCH:{t:"🟡 BANTAYAN",           c:"YELLOW", s:"Walang malinaw na direksyon."}
-  }[verdict];
-  const trendTxt = e.up ? "⬆️ Paakyat" : e.down ? "⬇️ Pababa" : "↔️ Walang direksyon";
-  const levelPrice = e.e50;
+  const meterPos = ((res.score+5)/10)*100;
+  const label = {BUY:"BUY", SELL:"SELL / AVOID", WAIT:"WAIT"}[res.verdict];
+  const verdictTxt = {
+    BUY:"Maraming indicator ang pabor sa pagtaas.",
+    SELL:"Maraming indicator ang pabor sa pagbaba. Kung spot ka lang, mas mainam na iwasan muna ang pagbili.",
+    WAIT:"Halo-halo ang signals. Mas ligtas maghintay ng malinaw na setup."
+  }[res.verdict];
 
-  let plan = "";
-  let planData = null;
-  if(verdict==="BUY"){
-    const lv = levelsAt(P, i, price);
-    const risk = price - lv.sl;
-    const riskAmt = budget*0.01;
-    let qty = riskAmt/risk;
-    let cost = qty*price;
-    let capped = false;
-    if(cost > budget){ cost = budget; qty = budget/price; capped = true; }
-    const loss = qty*risk, gain = qty*risk*2;
-    planData = {coin, tf, entry:price, sl:lv.sl, tp:lv.tp, qty, cost};
-    plan = `
-      <div class="card">
-        <h2>Plano mo</h2>
-        <div class="grid">
-          <div class="kv"><span>Presyo ng pagbili</span><strong>$${fmt(price)}</strong></div>
-          <div class="kv"><span>Stop-loss ${help("sl")}</span><strong style="color:var(--sell)">$${fmt(lv.sl)}</strong></div>
-          <div class="kv"><span>Take-profit ${help("tp")}</span><strong style="color:var(--buy)">$${fmt(lv.tp)}</strong></div>
-          <div class="kv"><span>Ilan ang bibilhin ${help("qty")}</span><strong>${fmt(qty)} ${coin}</strong></div>
-          <div class="kv"><span>Halaga</span><strong>${money(cost)}</strong></div>
-          <div class="kv"><span>Pwedeng malugi</span><strong style="color:var(--sell)">${money(loss)}</strong></div>
-          <div class="kv" style="grid-column:1/-1"><span>Posibleng kita</span><strong style="color:var(--buy)">${money(gain)}</strong></div>
-        </div>
-        <div id="hint-box"></div>
-        ${capped?`<div class="small" style="margin-top:8px">Na-cap sa budget mo, kaya mas mababa ang pwedeng malugi kaysa 1%.</div>`:""}
-        <button class="alt" id="saveTrade">💾 I-save ang trade</button>
-      </div>`;
-  }
-
-  const holdLine = (verdict==="HOLD"||verdict==="WATCH")
-    ? `<div class="price">Antas na babantayan: <b>$${fmt(levelPrice)}</b> (kapag bumaba dito, isipin nang magbenta)</div>` : "";
-
-  const why = reasonsFor(verdict, e, levelPrice);
+  const dotClass = p => p>0?"g":p<0?"r":"y";
   $("out").innerHTML = `
     <div class="card verdict">
-      <div class="small">${coin} · ${TF_LABEL[tf]}</div>
-      <div class="big ${V.c}">${V.t}</div>
-      <div class="sentence">${V.s}</div>
-      <div class="chip">Trend: ${trendTxt} ${help("trend")}</div>
-      <div class="price">Presyo ngayon: $${fmt(price)}</div>
-      ${holdLine}
-      <div id="hint-box-top"></div>
+      <div class="small">${sym.replace("USDT","")}/USDT · ${tf}</div>
+      <div class="big ${res.verdict}">${label}</div>
+      <div class="price">Presyo: $${fmt(res.price)}</div>
+      <div class="meter"><b></b><i style="left:${meterPos}%"></i></div>
+      <div class="small">Score: ${res.score>0?"+":""}${res.score} / 5</div>
+      <div style="margin-top:10px;font-size:14px">${verdictTxt}</div>
+      ${res.note?`<div style="margin-top:8px;font-size:13px;color:var(--wait)">${res.note}</div>`:""}
     </div>
-    ${plan}
-    <div class="card">
-      <h2>Bakit?</h2>
-      <ul class="why">${why.map(w=>`<li>${w}</li>`).join("")}</ul>
-    </div>
-    <div class="card">
-      <button class="alt" id="runBt" style="margin-top:0">🧪 Subukan sa nakaraan</button>
-      <div id="bt"></div>
-    </div>
-    <div class="small" style="text-align:center;margin-bottom:12px">Source: ${source} · huling candle: ${new Date(r.lastT).toLocaleString()}${source==="Coinbase"&&tf==="4h"?"<br>(Coinbase: 6 na oras ang candle na gamit)":""}</div>
-  `;
 
-  $("runBt").addEventListener("click", runBacktest);
-  if(planData){
-    $("saveTrade").addEventListener("click", ()=>{
-      addTrade(planData);
-      $("saveTrade").textContent = "✅ Na-save sa Mga Trade Ko";
-      $("saveTrade").disabled = true;
-    });
-  }
-}
+    <div class="card">
+      <h2>Chart (huling 80 candles)</h2>
+      <canvas id="chart"></canvas>
+      <div class="small" style="margin-top:6px">⬜ Presyo · 🟦 EMA20 · 🟧 EMA50</div>
+    </div>
 
-function runBacktest(){
-  if(!state) return;
-  const btn = $("runBt");
-  const r = backtest(state.closed, state.budget);
-  let verdictLine, color;
-  if(r.n < 10){ verdictLine = "Kakaunti ang trades, hindi pa sapat na batayan."; color = "YELLOW"; }
-  else if(r.totalR > 0){ verdictLine = "Kumita sa nakaraan."; color = "GREEN"; }
-  else { verdictLine = "Hindi kumita sa nakaraan. Mag-ingat sa coin na ito."; color = "RED"; }
-  $("bt").innerHTML = `
-    <div style="margin-top:12px">
-      <div class="bt-big ${color}">${verdictLine}</div>
+    <div class="card">
+      <h2>Mga dahilan</h2>
+      <ul>${res.reasons.map(r=>`<li><span class="dot ${dotClass(r.pts)}"></span><span>${r.txt}</span></li>`).join("")}</ul>
+    </div>
+
+    <div class="card">
+      <h2>${isShort?"Reference levels (short)":"Reference levels (long)"}</h2>
       <div class="grid">
-        <div class="kv"><span>Ilang beses nag-signal</span><strong>${r.n}</strong></div>
-        <div class="kv"><span>Panalo</span><strong>${r.wins} (${r.winRate.toFixed(0)}%)</strong></div>
-        <div class="kv"><span>Talo</span><strong>${r.losses}</strong></div>
-        <div class="kv"><span>Kabuuang resulta</span><strong style="color:var(--${r.money>=0?"buy":"sell"})">${r.money>=0?"+":""}${money(r.money)}</strong></div>
+        <div class="kv"><span>Entry</span><strong>$${fmt(lv.entry)}</strong></div>
+        <div class="kv"><span>Stop-loss</span><strong style="color:var(--sell)">$${fmt(lv.sl)}</strong></div>
+        <div class="kv"><span>Take-profit (1:2)</span><strong style="color:var(--buy)">$${fmt(lv.tp)}</strong></div>
+        <div class="kv"><span>Layo ng SL</span><strong>${pctMove.toFixed(2)}%</strong></div>
       </div>
-      <div class="small" style="margin-top:8px">Sinubukan sa huling ${r.days} araw ng ${state.coin} (${TF_LABEL[state.tf]}). Kung ang budget mo ay ${money(state.budget)} at 1% ang risk sa bawat trade. Kasama na ang bayad na 0.1% sa bawat bili at benta. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
-    </div>`;
-  btn.textContent = "🧪 Ulitin ang pagsubok";
-}
+      <div class="small" style="margin-top:8px">Base sa ATR(14) × 1.5 para sa stop-loss. ${res.verdict==="WAIT"?"Para sa reference lang dahil WAIT ang signal.":""}</div>
+    </div>
 
-/* ---------- Journal ---------- */
-function loadJ(){
-  try{ const j = JSON.parse(localStorage.getItem("th_journal")||"[]"); return Array.isArray(j)?j:[]; }catch(e){ return []; }
-}
-function saveJ(j){
-  try{ localStorage.setItem("th_journal", JSON.stringify(j)); }catch(e){}
-}
-function addTrade(p){
-  const j = loadJ();
-  j.unshift({id:Date.now(), coin:p.coin, tf:p.tf, entry:p.entry, sl:p.sl, tp:p.tp, qty:p.qty, cost:p.cost, time:Date.now(), status:"open"});
-  saveJ(j);
-  renderJournal({});
-}
-function renderJournal(prices){
-  const j = loadJ();
-  const box = $("journal");
-  if(!j.length){
-    box.innerHTML = `<div class="small">Wala pang naka-save. Kapag may "PWEDENG BUMILI", pindutin ang "I-save ang trade" para masubaybayan dito.</div>`;
-    return;
-  }
-  box.innerHTML = j.map(t=>{
-    if(!COINS.includes(t.coin)) return "";
-    let tag, line;
-    if(t.status==="tp"){
-      tag = `<span class="tag GREEN">✅ Naabot ang take-profit</span>`;
-      line = `Kita: <b class="GREEN">+${money((t.tp-t.entry)*t.qty)}</b>`;
-    } else if(t.status==="sl"){
-      tag = `<span class="tag RED">❌ Tumama sa stop-loss</span>`;
-      line = `Lugi: <b class="RED">${money((t.sl-t.entry)*t.qty)}</b>`;
-    } else {
-      tag = `<span class="tag YELLOW">⏳ Bukas pa</span>`;
-      const cur = prices[t.coin];
-      line = cur ? `Ngayon: $${fmt(cur)} · <b class="${cur>=t.entry?"GREEN":"RED"}">${money((cur-t.entry)*t.qty)}</b>` : `I-refresh para makita ang presyo ngayon.`;
-    }
-    return `<div class="trade">
-      <div class="top"><span>${t.coin} · ${TF_LABEL[t.tf]||""}</span>${tag}</div>
-      <div class="small" style="margin-top:6px">Bili: $${fmt(t.entry)} · Stop-loss: $${fmt(t.sl)} · Take-profit: $${fmt(t.tp)}</div>
-      <div class="small">${fmt(t.qty)} ${t.coin} · ${money(t.cost)} · ${new Date(t.time).toLocaleString()}</div>
-      <div style="margin-top:6px;font-size:14px">${line}</div>
-      <button class="del" data-del="${t.id}">Tanggalin</button>
-    </div>`;
-  }).join("");
-}
+    <div class="card">
+      <h2>Position size</h2>
+      <div class="grid">
+        <div class="kv"><span>Max na malulugi (${riskPct}%)</span><strong>$${fmt(riskAmt)}</strong></div>
+        <div class="kv"><span>Laki ng posisyon</span><strong>$${fmt(posValue)}</strong></div>
+        <div class="kv"><span>Dami ng coin</span><strong>${fmt(qty)}</strong></div>
+        <div class="kv"><span>Kung abot TP</span><strong style="color:var(--buy)">+$${fmt(qty*dist*2)}</strong></div>
+      </div>
+      ${capped?`<div class="small" style="margin-top:8px">Na-cap sa budget mo. Mas mababa ang aktwal na risk kaysa ${riskPct}%.</div>`:""}
+    </div>
 
-/* Binabantayan ang mga bukas na trade gamit ang 1-oras na candles */
-let checking = false;
-async function checkJournal(){
-  if(checking) return;
-  const j = loadJ();
-  const open = j.filter(t=>t.status==="open" && COINS.includes(t.coin));
-  if(!open.length){ renderJournal({}); return; }
-  checking = true;
-  const btn = $("refresh"); btn.disabled = true; btn.textContent = "Sinusuri...";
-  const prices = {}, closedNow = [], failed = [];
-  const coins = [...new Set(open.map(t=>t.coin))];
-  for(const coin of coins){
-    try{
-      const {candles} = await fetchKlines(coin, "1h");
-      prices[coin] = candles[candles.length-1].c;
-      for(const t of open.filter(x=>x.coin===coin)){
-        for(const c of candles){
-          if(c.t <= t.time) continue;
-          if(c.l <= t.sl){ t.status="sl"; t.closeTime=c.t; closedNow.push(t); break; }
-          if(c.h >= t.tp){ t.status="tp"; t.closeTime=c.t; closedNow.push(t); break; }
-        }
-      }
-    }catch(e){ failed.push(coin); }
-  }
-  saveJ(j);
-  renderJournal(prices);
-  const n = $("notice");
-  if(closedNow.length){
-    n.innerHTML = `<div class="notice">🔔 May na-abot sa mga trade mo:<br>` + closedNow.map(t=>
-      `${t.coin}: ${t.status==="tp"?"✅ naabot ang take-profit":"❌ tumama sa stop-loss"}`).join("<br>") + `</div>`;
-  } else { n.innerHTML = ""; }
-  if(failed.length) $("journal").insertAdjacentHTML("afterbegin", `<div class="small err" style="margin-bottom:8px">Hindi ma-check ang ${failed.join(", ")}. Subukan ulit mamaya.</div>`);
-  btn.disabled = false; btn.textContent = "I-refresh ang mga trade";
-  checking = false;
+    <div class="card">
+      <h2>Indicators</h2>
+      <div class="grid">
+        <div class="kv"><span>RSI(14)</span><strong>${res.R.toFixed(1)}</strong></div>
+        <div class="kv"><span>MACD hist</span><strong>${fmt(res.H)}</strong></div>
+        <div class="kv"><span>EMA20</span><strong>${fmt(res.E20)}</strong></div>
+        <div class="kv"><span>EMA50</span><strong>${fmt(res.E50)}</strong></div>
+        <div class="kv"><span>ATR(14)</span><strong>${fmt(res.A)}</strong></div>
+        <div class="kv"><span>Volume vs avg</span><strong>${res.volRatio.toFixed(2)}x</strong></div>
+      </div>
+    </div>
+    <div class="small" style="text-align:center;margin-bottom:12px">Source: ${res.source} · huling candle: ${new Date(res.lastT).toLocaleString()}<br>Na-update: ${new Date().toLocaleTimeString()}${res.source==="Coinbase"&&tf==="4h"?"<br>(Coinbase: 6h candles ang gamit sa 4h)":""}</div>
+  `;
+  drawChart(res);
 }
 
 /* ---------- Events ---------- */
-function saveSettings(){
-  try{ localStorage.setItem("th_settings", JSON.stringify({c:$("coin").value,t:$("tf").value,b:$("budget").value,h:$("hold").checked})); }catch(e){}
-}
-function loadSettings(){
+function save(){
   try{
-    const d = JSON.parse(localStorage.getItem("th_settings")||"null");
-    if(!d) return;
-    if(COINS.includes(d.c)) $("coin").value = d.c;
-    if(TF_LABEL[d.t]) $("tf").value = d.t;
-    if(d.b) $("budget").value = d.b;
-    $("hold").checked = !!d.h;
+    localStorage.setItem("ta", JSON.stringify({
+      s:$("symbol").value, t:$("tf").value, b:$("budget").value, r:$("risk").value
+    }));
   }catch(e){}
 }
-document.addEventListener("click", ev=>{
-  const q = ev.target.closest(".q");
-  if(q){
-    const key = q.getAttribute("data-h");
-    const card = q.closest(".card");
-    let box = card.querySelector(".hint");
-    if(box && box.getAttribute("data-k")===key){ box.remove(); return; }
-    if(box) box.remove();
-    card.insertAdjacentHTML("beforeend", `<div class="hint" data-k="${key}">${HINTS[key]}</div>`);
-    return;
-  }
-  const del = ev.target.closest("[data-del]");
-  if(del){
-    const id = Number(del.getAttribute("data-del"));
-    saveJ(loadJ().filter(t=>t.id!==id));
-    renderJournal({});
+function load(){
+  try{
+    const d = JSON.parse(localStorage.getItem("ta")||"null");
+    if(!d) return;
+    $("symbol").value = d.s; $("tf").value = d.t; $("budget").value = d.b; $("risk").value = d.r;
+  }catch(e){}
+}
+
+$("go").addEventListener("click", async ()=>{
+  const btn = $("go");
+  const sym = $("symbol").value, tf = $("tf").value;
+  save();
+  btn.disabled = true; btn.textContent = "Kinukuha ang data...";
+  $("out").innerHTML = "";
+  try{
+    const {candles, source} = await fetchKlines(sym, tf);
+    const res = analyze(candles);
+    res.source = source;
+    res.lastT = candles[candles.length-1].t;
+    render(res, sym, tf);
+  }catch(e){
+    $("out").innerHTML = `<div class="card err">Hindi makuha ang data: ${e.message}<br><br><span class="small">I-check ang internet mo, o subukang gumamit ng ibang network (WiFi/mobile data) o i-off ang VPN kung meron.</span></div>`;
+  }finally{
+    btn.disabled = false; btn.textContent = "🔍 I-analyze";
   }
 });
-$("go").addEventListener("click", runCheck);
-$("refresh").addEventListener("click", checkJournal);
-loadSettings();
-renderJournal({});
-checkJournal();
+window.addEventListener("resize", ()=>{});
+load();
 </script>
 </body>
 </html>
