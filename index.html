@@ -84,10 +84,10 @@
       <div>
         <label for="tf">Timeframe</label>
         <select id="tf">
-          <option value="15m">15 minuto</option>
+          <option value="15m" selected>15 minuto</option>
           <option value="1h">1 oras</option>
           <option value="4h">4 na oras</option>
-          <option value="1d" selected>1 araw</option>
+          <option value="1d">1 araw</option>
         </select>
       </div>
     </div>
@@ -98,6 +98,13 @@
   </div>
 
   <div id="out"></div>
+
+  <div class="card" id="allCard">
+    <h2>🧪 Pagsubok sa lahat ng coin</h2>
+    <div class="small">Sinusubukan ang mga strategy sa 10 coin gamit ang napiling timeframe at budget, para mas maraming trades ang batayan. Maaaring abutin ng isang minuto.</div>
+    <button class="alt" id="allBt">Subukan sa lahat ng coin</button>
+    <div id="allOut"></div>
+  </div>
 
   <div class="card" id="journalCard">
     <h2>📒 Mga Trade Ko</h2>
@@ -161,13 +168,118 @@ function atrS(cs, period){
   }
   return out;
 }
+function pivotArr(cs){
+  const n = cs.length, W = 3, out = new Array(n).fill(false);
+  for(let k=W;k<n-W;k++){
+    let ok = true;
+    for(let j=1;j<=W;j++){
+      if(!(cs[k].h > cs[k-j].h) || !(cs[k].h >= cs[k+j].h)){ ok = false; break; }
+    }
+    out[k] = ok;
+  }
+  return out;
+}
 function prep(cs){
   const closes = cs.map(c=>c.c);
-  return {cs, closes, e20:emaS(closes,20), e50:emaS(closes,50), e200:emaS(closes,200), rsi:rsiS(closes,14), atr:atrS(cs,14)};
+  return {cs, closes, e20:emaS(closes,20), e50:emaS(closes,50), e200:emaS(closes,200), rsi:rsiS(closes,14), atr:atrS(cs,14), piv:pivotArr(cs), brk:new Array(cs.length)};
 }
 
-/* Strategy: Trend Breakout. Bumili kapag nag-breakout sa pinakamataas ng huling 20 candle habang paakyat ang trend */
-function evalAt(P, i){
+/* ----- Break & Retest -----
+   1) Key level: resistance na natalbog nang hindi bababa sa 2 beses (mga pivot high na magkakalapit ang presyo).
+   2) Breakout: sumara ang candle (berde) sa itaas ng level, at mas mataas ang volume kaysa sa bawat isa sa nakaraang 5 candle.
+   3) Retest: bumalik ang presyo sa level at may rejection candle (hammer o bullish engulfing) na sumara sa itaas ng level.
+   Stop-loss sa ilalim ng wick/zone. Take-profit 1:2. */
+function breakoutAt(P, b){
+  if(P.brk[b] !== undefined) return P.brk[b];
+  const cs = P.cs, atr = P.atr[b];
+  let res = null;
+  if(atr != null && b >= 20){
+    const c = cs[b];
+    let vmax = 0;
+    for(let k=b-5;k<=b-1;k++) vmax = Math.max(vmax, cs[k].v);
+    if(vmax > 0 && c.v > vmax && c.c > c.o){
+      const tol = 0.5*atr;
+      const piv = [];
+      for(let k=Math.max(3,b-120);k<=b-4;k++) if(P.piv[k]) piv.push(k);
+      for(const k0 of piv){
+        const L0 = cs[k0].h;
+        let sum = 0, cnt = 0;
+        for(const k of piv){ if(Math.abs(cs[k].h-L0) <= tol){ sum += cs[k].h; cnt++; } }
+        if(cnt < 2) continue;
+        const L = sum/cnt;
+        if(c.c > L + 0.1*atr && cs[b-1].c <= L && cs[b-2].c <= L && cs[b-3].c <= L){
+          if(res === null || L > res) res = L;
+        }
+      }
+    }
+  }
+  P.brk[b] = res;
+  return res;
+}
+function evalBR(P, i){
+  const cs=P.cs, close=P.closes[i], c=cs[i];
+  const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
+  const up   = close>e200 && e50>e200;
+  const down = close<e50 && e50<e200;
+  const tol  = 0.5*atr;
+  let ll = Infinity;
+  for(let k=i-10;k<=i-1;k++) ll = Math.min(ll, cs[k].l);
+
+  let phase = "none", level = null, bIdx = -1, failed = null;
+  for(let b=i-1;b>=i-30;b--){
+    const L = breakoutAt(P, b);
+    if(L == null) continue;
+    let bad = false;
+    for(let k=b+1;k<=i;k++){ if(cs[k].c < L - tol){ bad = true; break; } }
+    if(bad){ if(!failed) failed = {L, b}; continue; }
+    phase = "pending"; level = L; bIdx = b; break;
+  }
+  if(phase === "none" && failed){ phase = "failed"; level = failed.L; bIdx = failed.b; }
+
+  let buy = false, slPrice = null, touched = false, pattern = false;
+  if(phase === "pending"){
+    touched = c.l <= level + tol;
+    const rng = c.h - c.l;
+    let hammer = false;
+    if(rng > 0){
+      const body = Math.abs(c.c-c.o), lw = Math.min(c.o,c.c) - c.l;
+      hammer = lw >= 2*body && lw >= 0.5*rng && (c.c-c.l)/rng >= 0.6;
+    }
+    const p = cs[i-1];
+    const engulf = p.c < p.o && c.c > c.o && c.o <= p.c && c.c >= p.o;
+    pattern = hammer || engulf;
+    if(touched && pattern && c.c > level){
+      const sl = Math.min(c.l, level - tol) - 0.1*atr;
+      const risk = close - sl;
+      if(risk > 0 && risk <= 3*atr && risk/close >= 0.004){ buy = true; slPrice = sl; }
+    }
+  }
+
+  let holdAdvice, watch;
+  if(phase === "pending"){ holdAdvice = "HOLD"; watch = level - tol; }
+  else if(phase === "failed" && close < level - tol){ holdAdvice = "SELL"; watch = ll; }
+  else { holdAdvice = (down || close < ll) ? "SELL" : (up ? "HOLD" : "WATCH"); watch = ll; }
+
+  return {up, down, buy, slPrice, phase, level, since: bIdx>=0 ? i-bIdx : null, touched, pattern, holdAdvice, watch, trail:ll, e20, e50, e200, rsi, atr};
+}
+function nearestResistance(P, i){
+  const cs = P.cs, atr = P.atr[i], close = P.closes[i], tol = 0.5*atr;
+  const piv = [];
+  for(let k=Math.max(3,i-120);k<=i-3;k++) if(P.piv[k]) piv.push(k);
+  let best = null;
+  for(const k0 of piv){
+    const L0 = cs[k0].h;
+    let sum = 0, cnt = 0;
+    for(const k of piv){ if(Math.abs(cs[k].h-L0) <= tol){ sum += cs[k].h; cnt++; } }
+    if(cnt < 2) continue;
+    const L = sum/cnt;
+    if(L > close && (best === null || L < best)) best = L;
+  }
+  return best;
+}
+
+/* ----- Trend Breakout (para sa paghahambing) ----- */
+function evalTB(P, i){
   const cs=P.cs, close=P.closes[i];
   const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
   const up   = close>e200 && e50>e200;
@@ -182,7 +294,7 @@ function evalAt(P, i){
   return {up, down, breakout, extended, buy, exit, hh, trail:ll, e20, e50, e200, rsi, atr};
 }
 
-/* Luma: bumili sa pullback (para lang sa paghahambing sa backtest) */
+/* ----- Pullback (luma, para sa paghahambing) ----- */
 function evalPullback(P, i){
   const cs=P.cs, close=P.closes[i], c=cs[i];
   const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
@@ -207,18 +319,21 @@ function levelsAt(P, i, entry){
   const tp = entry + 2*(entry-sl);
   return {sl, tp};
 }
-function decide(e, hold){
-  if(!hold){
-    if(e.buy) return "BUY";
-    if(e.down) return "AVOID";
-    return "WAIT";
+/* Stop-loss at take-profit (1:2). Ang Break & Retest ay may sariling stop-loss mula sa rejection candle. */
+function levelsFor(e, P, i, entry){
+  if(e.slPrice != null){
+    const sl = e.slPrice;
+    if(!(sl < entry)) return null;
+    return {sl, tp: entry + 2*(entry-sl)};
   }
-  if(e.down || e.exit) return "SELL";
-  if(e.up) return "HOLD";
-  return "WATCH";
+  return levelsAt(P, i, entry);
+}
+function decide(e, hold){
+  if(!hold) return e.buy ? "BUY" : "WAIT";
+  return e.holdAdvice;
 }
 function backtest(cs, budget, fn){
-  fn = fn || evalAt;
+  fn = fn || evalBR;
   const P = prep(cs);
   const trades = [];
   const FEE = 0.001;
@@ -227,7 +342,8 @@ function backtest(cs, budget, fn){
     const e = fn(P, i);
     if(!e.buy){ i++; continue; }
     const entry = cs[i+1].o;
-    const lv = levelsAt(P, i, entry);
+    const lv = levelsFor(e, P, i, entry);
+    if(!lv){ i++; continue; }
     const risk = entry - lv.sl;
     let R=null, exitPrice=null, j=i+1, hit=false;
     const last = Math.min(i+100, cs.length-1);
@@ -250,8 +366,9 @@ function backtest(cs, budget, fn){
   const wins = trades.filter(t=>t.R>0).length;
   const totalR = trades.reduce((s,t)=>s+t.R,0);
   const tpHits = trades.filter(t=>t.hit).length;
-  const days = Math.max(1, Math.round((cs[cs.length-1].t - cs[200].t)/86400000));
-  return {n, wins, losses:n-wins, winRate: n? wins/n*100 : 0, tpRate: n? tpHits/n*100 : 0, totalR, money: totalR*budget*0.01, days};
+  const t0 = cs[Math.min(200, cs.length-1)].t;
+  const days = Math.max(1, Math.round((cs[cs.length-1].t - t0)/86400000));
+  return {n, wins, losses:n-wins, winRate: n? wins/n*100 : 0, tpRate: n? tpHits/n*100 : 0, tpHits, totalR, money: totalR*budget*0.01, days};
 }
 /* ================= PURE END ================= */
 
@@ -340,6 +457,30 @@ function fetchKlines(base, tf){
   });
 }
 
+/* Mas mahabang kasaysayan para sa "Subukan sa nakaraan". Binance ang ginagamit (maraming pahina);
+   kung hindi gumana, ang karaniwang data na lang. */
+async function fetchHistory(base, tf){
+  const pages = {"15m":6,"1h":4,"4h":3,"1d":1}[tf] || 1;
+  if(pages > 1){
+    for(const host of ["https://data-api.binance.vision","https://api.binance.com"]){
+      try{
+        let all = [], end = null;
+        for(let p=0;p<pages;p++){
+          const url = `${host}/api/v3/klines?symbol=${base}USDT&interval=${tf}&limit=1000` + (end ? `&endTime=${end}` : "");
+          const j = await getJSON(url);
+          if(!j.length) break;
+          const part = j.map(k=>({t:k[0],o:+k[1],h:+k[2],l:+k[3],c:+k[4],v:+k[5]}));
+          all = part.concat(all);
+          end = part[0].t - 1;
+          if(j.length < 1000) break;
+        }
+        if(all.length >= 230) return {candles:all, source:"Binance"};
+      }catch(e){}
+    }
+  }
+  return fetchKlines(base, tf);
+}
+
 /* ---------- Helpers ---------- */
 const $ = id => document.getElementById(id);
 function fmt(n){
@@ -358,7 +499,8 @@ const HINTS = {
   trend:"Ang trend ay ang direksyon ng presyo sa mas mahabang panahon. Mas mataas ang tsansa kapag sumasabay ka sa paakyat na trend.",
   sl:"Ito ang presyong lalabas ka kapag bumaba ang coin, para hindi lumaki ang lugi. Ilagay ito bilang order sa exchange mo.",
   tp:"Ito ang presyong lalabas ka kapag tumaas ang coin, para makuha mo ang kita.",
-  qty:"Kinalkula ito para 1% lang ng budget mo ang pwedeng mawala kung tumama ang presyo sa stop-loss."
+  qty:"Kinalkula ito para 1% lang ng budget mo ang pwedeng mawala kung tumama ang presyo sa stop-loss.",
+  br:"Break & Retest: hinihintay munang lumampas ang presyo sa isang key level (resistance) na may mataas na volume. Pagkatapos, hinihintay itong bumalik sa level at magpakita ng rejection candle (hammer o bullish engulfing) bago bumili. Ang stop-loss ay nasa ilalim ng wick."
 };
 function help(key){
   return `<button class="q" data-h="${key}" aria-label="Paliwanag">?</button>`;
@@ -369,39 +511,62 @@ let state = null;
 
 /* ---------- Check ---------- */
 function reasonsFor(verdict, e, levelPrice){
+  const L = e.level != null ? "$"+fmt(e.level) : "";
   if(verdict==="BUY") return [
-    "Lumampas ang presyo sa pinakamataas ng huling 20 candle (breakout).",
-    "Paakyat ang pangmatagalang trend (nasa itaas ng EMA200).",
-    "Hindi pa sobrang taas ang presyo, kaya hindi ito paghabol."
+    "Nag-breakout ang presyo sa key level na "+L+" at sumara sa itaas, na may mataas na volume.",
+    "Bumalik ang presyo sa level at nagpakita ng rejection candle (hammer o bullish engulfing).",
+    "Nasa ilalim ng wick ang stop-loss, kaya malinaw kung kailan mali ang trade."
   ];
-  if(verdict==="AVOID") return [
-    "Pababa ang trend ng coin.",
-    "Madalas na bumababa pa ito, kaya huwag munang bumili."
-  ];
-  if(verdict==="SELL") return [
-    e.down ? "Pababa na ang trend ng coin." : "Bumaba ang presyo sa pinakamababa ng huling 10 candle.",
-    "Mas mabuting ibenta bago lumaki ang lugi."
-  ];
-  if(verdict==="HOLD") return [
-    "Paakyat pa rin ang trend ng coin.",
-    "Hawakan hangga't hindi nagsasara ang presyo sa ibaba ng $"+fmt(levelPrice)+"."
-  ];
+  if(verdict==="SELL"){
+    if(e.phase==="failed") return [
+      "Bumalik ang presyo sa loob ng lumang zone ("+L+"), invalid na ang setup.",
+      "Mas mabuting lumabas para protektahan ang puhunan."
+    ];
+    return [
+      "Bumaba ang presyo sa pinakamababa ng huling 10 candle, humina na ang coin.",
+      "Mas mabuting ibenta bago lumaki ang lugi."
+    ];
+  }
+  if(verdict==="HOLD"){
+    if(e.phase==="pending") return [
+      "Nasa itaas pa ng level na "+L+" ang presyo.",
+      "Hawakan hangga't hindi nagsasara ang presyo sa ibaba ng $"+fmt(levelPrice)+"."
+    ];
+    return [
+      "Maayos pa ang takbo ng coin.",
+      "Hawakan hangga't hindi nagsasara ang presyo sa ibaba ng $"+fmt(levelPrice)+"."
+    ];
+  }
   if(verdict==="WATCH") return [
     "Walang malinaw na direksyon ang presyo.",
     "Bantayan. Kung magsara sa ibaba ng $"+fmt(levelPrice)+", magandang magbenta na."
   ];
   // WAIT
-  if(e.up && e.breakout && e.extended) return [
-    "Nag-breakout ang presyo, pero sobrang taas na.",
-    "Huwag humabol. Hintayin ang pagbaba o ang susunod na setup."
+  if(e.invalid) return [
+    "Bumaba na ang presyo sa ibaba ng stop-loss ng setup.",
+    "Kanselado ito. Maghintay ng bagong setup."
   ];
-  if(e.up) return [
-    "Paakyat ang trend, pero wala pang breakout.",
-    "Hintayin na magsara ang presyo sa itaas ng $"+fmt(e.hh)+"."
+  if(e.phase==="pending"){
+    if(e.touched && e.pattern) return [
+      "May rejection candle sa level na "+L+", pero hindi sulit ang laki ng stop-loss.",
+      "Masyadong malaki o masyadong maliit ang stop-loss kumpara sa bayad. Hintayin ang susunod na setup."
+    ];
+    if(e.touched) return [
+      "Bumalik na ang presyo sa level na "+L+", pero wala pang rejection candle.",
+      "Hintayin ang hammer o bullish engulfing na sumasara sa itaas ng level."
+    ];
+    return [
+      "Nag-breakout na ang presyo sa "+L+" ("+e.since+" candle ang nakaraan).",
+      "Hintayin na bumalik ito sa level at magpakita ng rejection candle."
+    ];
+  }
+  if(e.phase==="failed") return [
+    "Bumalik sa loob ng zone ang presyo, kanselado ang breakout sa "+L+".",
+    "Maghintay ng bagong breakout."
   ];
   return [
-    "Wala pang malinaw na uptrend (hindi pa nasa itaas ng EMA200).",
-    "Mas ligtas na maghintay."
+    "Wala pang valid na breakout. Kailangang sumara ang presyo sa itaas ng key level na may mataas na volume.",
+    e.nearRes != null ? "Bantayan ang resistance sa $"+fmt(e.nearRes)+"." : "Walang malinaw na key level na paulit-ulit na tinatalbugan ngayon."
   ];
 }
 
@@ -423,8 +588,10 @@ async function runCheck(){
     const closed = candles.slice(0,-1);          // ang huling candle ay hindi pa tapos
     const P = prep(closed);
     const i = closed.length-1;
-    const e = evalAt(P, i);
-    const verdict = decide(e, hold);
+    const e = evalBR(P, i);
+    e.nearRes = nearestResistance(P, i);
+    let verdict = decide(e, hold);
+    if(verdict==="BUY" && !levelsFor(e, P, i, price)){ e.invalid = true; verdict = "WAIT"; }
     state = {coin, tf, closed, budget};
     renderResult({coin, tf, budget, source, price, e, verdict, P, i, lastT: candles[candles.length-1].t, chartCandles: candles.slice(-60)});
   }catch(err){
@@ -440,17 +607,17 @@ function renderResult(r){
     BUY:  {t:"🟢 PWEDENG BUMILI",     c:"GREEN",  s:"Maganda ang setup ngayon."},
     WAIT: {t:"🟡 MAGHINTAY MUNA",     c:"YELLOW", s:"Wala pang magandang pasok."},
     AVOID:{t:"🔴 HUWAG MUNANG BUMILI",c:"RED",    s:"Hindi maganda ang kalagayan ngayon."},
-    SELL: {t:"🔴 MAGBENTA NA",        c:"RED",    s:"Sira na ang trend, mag-ingat."},
+    SELL: {t:"🔴 MAGBENTA NA",        c:"RED",    s:"Sira na ang setup, mag-ingat."},
     HOLD: {t:"🟢 HAWAKAN MUNA",       c:"GREEN",  s:"Maayos pa ang takbo ng coin."},
     WATCH:{t:"🟡 BANTAYAN",           c:"YELLOW", s:"Walang malinaw na direksyon."}
   }[verdict];
   const trendTxt = e.up ? "⬆️ Paakyat" : e.down ? "⬇️ Pababa" : "↔️ Walang direksyon";
-  const levelPrice = e.trail;
+  const levelPrice = e.watch;
 
   let plan = "";
   let planData = null;
   if(verdict==="BUY"){
-    const lv = levelsAt(P, i, price);
+    const lv = levelsFor(e, P, i, price);
     const risk = price - lv.sl;
     const riskAmt = budget*0.01;
     let qty = riskAmt/risk;
@@ -473,7 +640,7 @@ function renderResult(r){
         </div>
         <div id="hint-box"></div>
         ${capped?`<div class="small" style="margin-top:8px">Na-cap sa budget mo, kaya mas mababa ang pwedeng malugi kaysa 1%.</div>`:""}
-        <div class="small" style="margin-top:8px">Ang take-profit na 1:2 ay mas malaki ang kita kaysa lugi, pero hindi sigurado na maaabot ito. Mas madalas na mas mababa sa 50% ang panalo ng ganitong strategy, at ang malalaking panalo ang bumabawi.</div>
+        <div class="small" style="margin-top:8px">Ang take-profit na 1:2 ay mas malaki ang kita kaysa lugi, pero hindi sigurado na maaabot ito. Tingnan ang "Subukan sa nakaraan" para sa totoong porsyento ng pag-abot sa coin na ito.</div>
         <button class="alt" id="saveTrade">💾 I-save ang trade</button>
       </div>`;
   }
@@ -481,8 +648,7 @@ function renderResult(r){
   /* Para sa chart */
   const dir = e.up ? 1 : e.down ? -1 : 0;
   const dirTxt = dir>0 ? "⬆️ Pataas" : dir<0 ? "⬇️ Pababa" : "↔️ Pagilid";
-  let dirNote = "Batay lang ito sa trend ngayon. Hindi ito sigurado at pwedeng magbago anumang oras.";
-  if(e.up && e.extended) dirNote = "Paakyat ang trend, pero tumaas na nang malaki kaya posibleng bumaba muna bago ulit tumaas. Hindi ito sigurado.";
+  const dirNote = "Batay lang ito sa trend ngayon. Hindi ito sigurado at pwedeng magbago anumang oras.";
   const chartLevels = [];
   if(planData){
     chartLevels.push({price:planData.entry, label:"Bili", color:"#3b82f6"});
@@ -490,8 +656,10 @@ function renderResult(r){
     chartLevels.push({price:planData.tp, label:"Take-profit", color:"#22c55e"});
   } else if(verdict==="HOLD"||verdict==="WATCH"){
     chartLevels.push({price:levelPrice, label:"Exit", color:"#f59e0b"});
-  } else if(verdict==="WAIT" && e.up && !e.breakout){
-    chartLevels.push({price:e.hh, label:"Breakout", color:"#f59e0b"});
+  } else if(verdict==="WAIT"){
+    if(e.phase==="pending") chartLevels.push({price:e.level, label:"Key level", color:"#f59e0b"});
+    else if(e.phase==="failed") chartLevels.push({price:e.level, label:"Lumang level", color:"#f59e0b"});
+    else if(e.nearRes != null && (e.nearRes - price) <= 10*e.atr) chartLevels.push({price:e.nearRes, label:"Resistance", color:"#f59e0b"});
   }
   lastChart = {cs:r.chartCandles, levels:chartLevels, dir, atr:e.atr};
 
@@ -501,13 +669,13 @@ function renderResult(r){
   const why = reasonsFor(verdict, e, levelPrice);
   $("out").innerHTML = `
     <div class="card verdict">
-      <div class="small">${coin} · ${TF_LABEL[tf]} · Trend Breakout</div>
+      <div class="small">${coin} · ${TF_LABEL[tf]} · Break & Retest ${help("br")}</div>
       <div class="big ${V.c}">${V.t}</div>
       <div class="sentence">${V.s}</div>
       <div class="chip">Trend: ${trendTxt} ${help("trend")}</div>
       <div class="price">Presyo ngayon: $${fmt(price)}</div>
       ${holdLine}
-      ${tf==="15m" ? `<div class="small" style="margin-top:8px;color:var(--wait)">Sa 15 minuto, mabilis ang galaw at malaki ang epekto ng bayad kumpara sa kita. Mas mahina ang ebidensya para dito kaysa sa 1 araw, kaya mag-ingat at gumamit ng mas maliit na halaga.</div>` : ""}
+      ${tf==="15m" ? `<div class="small" style="margin-top:8px;color:var(--wait)">Sa 15 minuto, mabilis ang galaw at malaki ang epekto ng bayad kumpara sa kita. Subukan muna sa nakaraan bago gumamit ng totoong pera.</div>` : ""}
       <div id="hint-box-top"></div>
     </div>
     <div class="card">
@@ -539,6 +707,8 @@ function renderResult(r){
   }
 }
 
+const STRAT = {BR:"Break & Retest (bago)", TB:"Trend Breakout (1:2)", PB:"Pullback (luma)"};
+function sm(n){ return (n>=0?"+":"")+money(n); }
 function btBlock(title, r){
   return `<div style="margin-top:14px">
     <h2>${title}</h2>
@@ -546,34 +716,98 @@ function btBlock(title, r){
       <div class="kv"><span>Ilang beses nag-signal</span><strong>${r.n}</strong></div>
       <div class="kv"><span>Panalo</span><strong>${r.wins} (${r.winRate.toFixed(0)}%)</strong></div>
       <div class="kv"><span>Umabot sa take-profit</span><strong>${r.n ? r.tpRate.toFixed(0)+"%" : "-"}</strong></div>
-      <div class="kv"><span>Kabuuang resulta</span><strong style="color:var(--${r.money>=0?"buy":"sell"})">${r.money>=0?"+":""}${money(r.money)}</strong></div>
+      <div class="kv"><span>Kabuuang resulta</span><strong style="color:var(--${r.money>=0?"buy":"sell"})">${sm(r.money)}</strong></div>
     </div>
   </div>`;
 }
-function runBacktest(){
+function cmpText(list, scope){
+  if(list.every(x=>x[1].n===0)) return "Walang signal ang lahat ng strategy sa panahong ito.";
+  const best = list.slice().sort((x,y)=>y[1].money-x[1].money)[0];
+  if(best[1].money <= 0) return "Lugi ang lahat ng strategy "+scope+".";
+  return "Pinakamaganda "+scope+": "+STRAT[best[0]]+".";
+}
+async function runBacktest(){
   if(!state) return;
   const btn = $("runBt");
-  const a = backtest(state.closed, state.budget, evalAt);
-  const b = backtest(state.closed, state.budget, evalPullback);
+  btn.disabled = true; btn.textContent = "Kinukuha ang mas mahabang kasaysayan...";
+  let closed = state.closed;
+  try{
+    const h = await fetchHistory(state.coin, state.tf);
+    if(h && h.candles.length >= 230) closed = h.candles.slice(0,-1);
+  }catch(e){}
+  const a = backtest(closed, state.budget, evalBR);
+  const b = backtest(closed, state.budget, evalTB);
+  const c = backtest(closed, state.budget, evalPullback);
   let verdictLine, color;
   if(a.n < 10){ verdictLine = "Kakaunti ang trades, hindi pa sapat na batayan."; color = "YELLOW"; }
   else if(a.totalR > 0){ verdictLine = "Kumita sa nakaraan."; color = "GREEN"; }
   else { verdictLine = "Hindi kumita sa nakaraan. Mag-ingat sa coin na ito."; color = "RED"; }
-  let cmp = "Walang signal ang dalawa sa panahong ito.";
-  if(a.n>0 || b.n>0){
-    if(a.totalR > b.totalR) cmp = "Sa coin at timeframe na ito, mas maganda ang resulta ng Trend Breakout kaysa sa luma.";
-    else if(a.totalR < b.totalR) cmp = "Sa coin at timeframe na ito, mas maganda ang luma. Mag-ingat sa Trend Breakout dito.";
-    else cmp = "Pareho ang resulta ng dalawa.";
-  }
+  const cmp = cmpText([["BR",a],["TB",b],["PB",c]], "sa coin at timeframe na ito");
   $("bt").innerHTML = `
     <div style="margin-top:12px">
       <div class="bt-big ${color}">${verdictLine}</div>
       <div class="small">${cmp}</div>
-      ${btBlock("Trend Breakout (bago)", a)}
-      ${btBlock("Pullback (luma)", b)}
-      <div class="small" style="margin-top:10px">Sinubukan sa huling ${a.days} araw ng ${state.coin} (${TF_LABEL[state.tf]}). Kung ang budget mo ay ${money(state.budget)} at 1% ang risk sa bawat trade, na may take-profit na 1:2. Kasama na ang bayad na 0.1% sa bawat bili at benta. Kung hindi tumama ang stop-loss o take-profit sa loob ng 100 candle, isinasara ang trade sa presyo noon. Kaunti ang data sa 1 araw kaya kakaunti ang trades, kaya huwag umasa sa isang pagsubok lang. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
+      ${btBlock(STRAT.BR, a)}
+      ${btBlock(STRAT.TB, b)}
+      ${btBlock(STRAT.PB, c)}
+      <div class="small" style="margin-top:10px">Sinubukan sa huling ${a.days} araw ng ${state.coin} (${TF_LABEL[state.tf]}). Kung ang budget mo ay ${money(state.budget)}, 1% ang risk sa bawat trade, at may take-profit na 1:2. Kasama na ang bayad na 0.1% sa bawat bili at benta. Kapag walang tumama sa stop-loss o take-profit sa loob ng 100 candle, isinasara ang trade sa presyo noon. Kung kakaunti ang trades, huwag umasa sa isang pagsubok lang. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
     </div>`;
-  btn.textContent = "🧪 Ulitin ang pagsubok";
+  btn.disabled = false; btn.textContent = "🧪 Ulitin ang pagsubok";
+}
+
+function mkAgg(){ return {n:0, wins:0, tpHits:0, totalR:0}; }
+function addAgg(g, r){ g.n += r.n; g.wins += r.wins; g.tpHits += r.tpHits; g.totalR += r.totalR; }
+function finAgg(g, budget){
+  return {n:g.n, wins:g.wins, losses:g.n-g.wins, winRate:g.n? g.wins/g.n*100 : 0, tpRate:g.n? g.tpHits/g.n*100 : 0, totalR:g.totalR, money:g.totalR*budget*0.01};
+}
+let allRunning = false;
+async function runAll(){
+  if(allRunning) return;
+  const tf = $("tf").value, budget = parseFloat($("budget").value);
+  const out = $("allOut"), btn = $("allBt");
+  if(!(budget > 0)){ out.innerHTML = `<div class="err" style="margin-top:8px">Maglagay ng budget na higit sa 0.</div>`; return; }
+  allRunning = true; btn.disabled = true; out.innerHTML = "";
+  const G = {BR:mkAgg(), TB:mkAgg(), PB:mkAgg()};
+  const rows = [], failed = [];
+  let span = 0;
+  for(let k=0;k<COINS.length;k++){
+    const coin = COINS[k];
+    btn.textContent = "Sinusuri ang "+coin+" ("+(k+1)+"/"+COINS.length+")...";
+    try{
+      const h = await fetchHistory(coin, tf);
+      const closed = h.candles.slice(0,-1);
+      const a = backtest(closed, budget, evalBR);
+      const b = backtest(closed, budget, evalTB);
+      const c = backtest(closed, budget, evalPullback);
+      addAgg(G.BR, a); addAgg(G.TB, b); addAgg(G.PB, c);
+      rows.push({coin, a, b, c});
+      span = Math.max(span, a.days);
+    }catch(e){ failed.push(coin); }
+  }
+  if(!rows.length){
+    out.innerHTML = `<div class="err" style="margin-top:8px">Walang makuhang data. Subukang lumipat sa ibang network (WiFi o mobile data).</div>`;
+  } else {
+    const fa = finAgg(G.BR, budget), fb = finAgg(G.TB, budget), fc = finAgg(G.PB, budget);
+    const items = [["BR",fa],["TB",fb],["PB",fc]];
+    const best = items.slice().sort((x,y)=>y[1].money-x[1].money)[0];
+    let line, color;
+    if(items.every(x=>x[1].n===0)){ line = "Walang signal ang kahit anong strategy sa panahong ito."; color = "YELLOW"; }
+    else if(best[1].money <= 0){ line = "Lugi ang lahat ng strategy sa nakaraan. Huwag munang gumamit ng totoong pera sa mga ito."; color = "RED"; }
+    else if(best[1].n < 30){ line = "Kakaunti pa ang trades ("+best[1].n+"), hindi pa sapat na batayan. Pinakamaganda sa ngayon: "+STRAT[best[0]]+"."; color = "YELLOW"; }
+    else { line = "Kumita sa nakaraan ang "+STRAT[best[0]]+", pero hindi ito garantiya."; color = "GREEN"; }
+    out.innerHTML = `
+      <div style="margin-top:12px">
+        <div class="bt-big ${color}">${line}</div>
+        ${btBlock(STRAT.BR, fa)}
+        ${btBlock(STRAT.TB, fb)}
+        ${btBlock(STRAT.PB, fc)}
+        <h2 style="margin-top:14px">Bawat coin</h2>
+        <div class="small">BR = Break & Retest · TB = Trend Breakout · PB = Pullback. Bilang ng trades at resulta.</div>
+        ${rows.map(r=>`<div class="small" style="margin-top:4px"><b>${r.coin}</b> · BR: ${r.a.n} (${sm(r.a.money)}) · TB: ${r.b.n} (${sm(r.b.money)}) · PB: ${r.c.n} (${sm(r.c.money)})</div>`).join("")}
+        <div class="small" style="margin-top:10px">Sinubukan sa ${rows.length} coin (${TF_LABEL[tf]}, hanggang ${span} araw ang kasaysayan), budget ${money(budget)}, 1% risk, take-profit 1:2, bayad 0.1% sa bawat bili at benta.${failed.length ? " Hindi nakuha ang "+failed.join(", ")+"." : ""} Magkakasabay ang galaw ng mga coin, kaya hindi ito kasing-tibay ng magkakahiwalay na pagsubok. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
+      </div>`;
+  }
+  allRunning = false; btn.disabled = false; btn.textContent = "Subukan sa lahat ng coin";
 }
 
 /* ---------- Candle chart ---------- */
@@ -782,6 +1016,7 @@ document.addEventListener("click", ev=>{
 });
 window.addEventListener("resize", ()=>{ try{ drawChart(); }catch(e){} });
 $("go").addEventListener("click", runCheck);
+$("allBt").addEventListener("click", runAll);
 $("refresh").addEventListener("click", checkJournal);
 loadSettings();
 renderJournal({});
