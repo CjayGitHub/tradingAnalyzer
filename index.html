@@ -55,7 +55,7 @@
   .tag{font-size:12px;font-weight:700;border-radius:999px;padding:3px 10px;border:1px solid var(--line)}
   .del{background:transparent;color:var(--mut);border:1px solid var(--line);border-radius:8px;padding:6px 10px;font-size:13px;margin-top:8px}
   .bt-big{font-size:20px;font-weight:800;margin-bottom:6px}
-  canvas{width:100%;height:260px;display:block}
+  canvas{width:100%;height:320px;display:block}
 </style>
 </head>
 <body>
@@ -101,7 +101,7 @@
 
   <div class="card" id="allCard">
     <h2>🧪 Pagsubok sa lahat ng coin</h2>
-    <div class="small">Sinusubukan ang mga strategy sa 10 coin gamit ang napiling timeframe at budget, para mas maraming trades ang batayan. Maaaring abutin ng isang minuto.</div>
+    <div class="small">Sinusubukan ang Swing + POC strategy sa 10 coin gamit ang napiling timeframe at budget, para mas maraming trades ang batayan. Maaaring abutin ng isang minuto.</div>
     <button class="alt" id="allBt">Subukan sa lahat ng coin</button>
     <div id="allOut"></div>
   </div>
@@ -118,38 +118,6 @@
 
 <script>
 /* ================= PURE START ================= */
-function emaS(values, period){
-  const out = new Array(values.length).fill(null);
-  if(values.length < period) return out;
-  let sum = 0;
-  for(let i=0;i<period;i++) sum += values[i];
-  let prev = sum/period;
-  out[period-1] = prev;
-  const k = 2/(period+1);
-  for(let i=period;i<values.length;i++){
-    prev = values[i]*k + prev*(1-k);
-    out[i] = prev;
-  }
-  return out;
-}
-function rsiS(closes, period){
-  const out = new Array(closes.length).fill(null);
-  if(closes.length <= period) return out;
-  let gain=0, loss=0;
-  for(let i=1;i<=period;i++){
-    const d = closes[i]-closes[i-1];
-    if(d>=0) gain+=d; else loss-=d;
-  }
-  gain/=period; loss/=period;
-  out[period] = loss===0 ? 100 : 100-100/(1+gain/loss);
-  for(let i=period+1;i<closes.length;i++){
-    const d = closes[i]-closes[i-1];
-    gain = (gain*(period-1) + Math.max(d,0))/period;
-    loss = (loss*(period-1) + Math.max(-d,0))/period;
-    out[i] = loss===0 ? 100 : 100-100/(1+gain/loss);
-  }
-  return out;
-}
 function atrS(cs, period){
   const out = new Array(cs.length).fill(null);
   if(cs.length <= period) return out;
@@ -168,194 +136,186 @@ function atrS(cs, period){
   }
   return out;
 }
-function pivotArr(cs){
-  const n = cs.length, W = 3, out = new Array(n).fill(false);
-  for(let k=W;k<n-W;k++){
-    let ok = true;
-    for(let j=1;j<=W;j++){
-      if(!(cs[k].h > cs[k-j].h) || !(cs[k].h >= cs[k+j].h)){ ok = false; break; }
+
+/* ----- Swing High / Swing Low -----
+   Ang swing high ay candle na ang high ay mas mataas kaysa sa 5 candle sa kaliwa at kanan.
+   Ang swing low ay ang kabaligtaran. Nakukumpirma lang ito pagkatapos ng 5 candle. */
+const SW = 5;
+function pivotsHL(cs){
+  const n = cs.length, out = [];
+  for(let k=SW;k<n-SW;k++){
+    let hi = true, lo = true;
+    for(let j=1;j<=SW;j++){
+      if(!(cs[k].h > cs[k-j].h) || !(cs[k].h >= cs[k+j].h)) hi = false;
+      if(!(cs[k].l < cs[k-j].l) || !(cs[k].l <= cs[k+j].l)) lo = false;
+      if(!hi && !lo) break;
     }
-    out[k] = ok;
+    if(hi && !lo) out.push({i:k, t:"H", p:cs[k].h});
+    else if(lo && !hi) out.push({i:k, t:"L", p:cs[k].l});
   }
   return out;
 }
 function prep(cs){
-  const closes = cs.map(c=>c.c);
-  return {cs, closes, e20:emaS(closes,20), e50:emaS(closes,50), e200:emaS(closes,200), rsi:rsiS(closes,14), atr:atrS(cs,14), piv:pivotArr(cs), brk:new Array(cs.length)};
+  return {cs, atr:atrS(cs,14), pv:pivotsHL(cs), cache:{}};
+}
+/* Mga kumpirmadong swing hanggang candle i (salitan na high at low). */
+function swingsAt(P, i){
+  const lim = i - SW;
+  let lo = 0, hi = P.pv.length-1, k = -1;
+  while(lo <= hi){
+    const mid = (lo+hi)>>1;
+    if(P.pv[mid].i <= lim){ k = mid; lo = mid+1; } else hi = mid-1;
+  }
+  const raw = [];
+  for(let j=k;j>=0 && raw.length<16;j--) raw.push(P.pv[j]);
+  raw.reverse();
+  const A = [];
+  for(const p of raw){
+    const last = A[A.length-1];
+    if(last && last.t === p.t){
+      if((p.t==="H" && p.p>last.p) || (p.t==="L" && p.p<last.p)) A[A.length-1] = p;
+    } else A.push(p);
+  }
+  return A;
 }
 
-/* ----- Break & Retest -----
-   1) Key level: resistance na natalbog nang hindi bababa sa 2 beses (mga pivot high na magkakalapit ang presyo).
-   2) Breakout: sumara ang candle (berde) sa itaas ng level, at mas mataas ang volume kaysa sa bawat isa sa nakaraang 5 candle.
-   3) Retest: bumalik ang presyo sa level at may rejection candle (hammer o bullish engulfing) na sumara sa itaas ng level.
-   Stop-loss sa ilalim ng wick/zone. Take-profit 1:2. */
-function breakoutAt(P, b){
-  if(P.brk[b] !== undefined) return P.brk[b];
-  const cs = P.cs, atr = P.atr[b];
-  let res = null;
-  if(atr != null && b >= 20){
-    const c = cs[b];
-    let vmax = 0;
-    for(let k=b-5;k<=b-1;k++) vmax = Math.max(vmax, cs[k].v);
-    if(vmax > 0 && c.v > vmax && c.c > c.o){
-      const tol = 0.5*atr;
-      const piv = [];
-      for(let k=Math.max(3,b-120);k<=b-4;k++) if(P.piv[k]) piv.push(k);
-      for(const k0 of piv){
-        const L0 = cs[k0].h;
-        let sum = 0, cnt = 0;
-        for(const k of piv){ if(Math.abs(cs[k].h-L0) <= tol){ sum += cs[k].h; cnt++; } }
-        if(cnt < 2) continue;
-        const L = sum/cnt;
-        if(c.c > L + 0.1*atr && cs[b-1].c <= L && cs[b-2].c <= L && cs[b-3].c <= L){
-          if(res === null || L > res) res = L;
-        }
-      }
+/* ----- Fixed Range Volume Profile -----
+   Hinahati sa 24 na antas ang presyo mula swing low hanggang swing high (o kabaligtaran).
+   Ang POC ay ang antas na may pinakamaraming volume. */
+function profileFor(P, a, b, lo, hi){
+  const key = a+"_"+b;
+  if(P.cache[key]) return P.cache[key];
+  const NB = 24, step = (hi-lo)/NB, bins = new Array(NB).fill(0);
+  for(let k=a;k<=b;k++){
+    const c = P.cs[k], cl = Math.max(c.l, lo), ch = Math.min(c.h, hi);
+    if(!(ch > cl)){
+      const bi = Math.min(NB-1, Math.max(0, Math.floor((c.c-lo)/step)));
+      bins[bi] += c.v;
+      continue;
+    }
+    const b0 = Math.min(NB-1, Math.floor((cl-lo)/step)), b1 = Math.min(NB-1, Math.floor((ch-lo)/step));
+    for(let q=b0;q<=b1;q++){
+      const bl = lo+q*step, bh = bl+step;
+      const ov = Math.min(ch,bh) - Math.max(cl,bl);
+      if(ov > 0) bins[q] += c.v*ov/(ch-cl);
     }
   }
-  P.brk[b] = res;
-  return res;
+  let pi = 0;
+  for(let q=1;q<NB;q++) if(bins[q] > bins[pi]) pi = q;
+  const r = {bins, lo, hi, step, pocIdx:pi, poc:lo+(pi+0.5)*step, max:bins[pi]};
+  P.cache[key] = r;
+  return r;
 }
-function evalBR(P, i){
-  const cs=P.cs, close=P.closes[i], c=cs[i];
-  const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
-  const up   = close>e200 && e50>e200;
-  const down = close<e50 && e50<e200;
-  const tol  = 0.5*atr;
+
+/* ----- Swing + POC Strategy -----
+   Bullish (mas mataas na high at low): profile mula swing low hanggang swing high.
+     Entry: pagbalik ng presyo sa POC at pagsara sa itaas nito. Stop-loss: ibaba ng swing low. TP: 1:2.
+   Bearish (mas mababang high at low): profile mula swing high hanggang swing low.
+     Entry (short): pag-akyat ng presyo sa POC at pagsara sa ibaba nito. Stop-loss: itaas ng swing high. TP: 1:2. */
+function evalSP(P, i){
+  const cs = P.cs, c = cs[i], atr = P.atr[i], close = c.c;
+  const A = swingsAt(P, i);
   let ll = Infinity;
   for(let k=i-10;k<=i-1;k++) ll = Math.min(ll, cs[k].l);
+  const e = {bias:"none", status:"none", signal:null, A, atr, close, leg:null, prof:null, poc:null,
+             entry:null, sl:null, tp:null, risk:null, holdAdvice:"WATCH", watch:ll};
+  if(atr == null) return e;
+  const Hs = A.filter(p=>p.t==="H"), Ls = A.filter(p=>p.t==="L");
+  if(Hs.length < 2 || Ls.length < 2) return e;
+  const h1 = Hs[Hs.length-1], h0 = Hs[Hs.length-2], l1 = Ls[Ls.length-1], l0 = Ls[Ls.length-2];
+  const bull = h1.p > h0.p && l1.p > l0.p;
+  const bear = h1.p < h0.p && l1.p < l0.p;
+  if(!bull && !bear) return e;
 
-  let phase = "none", level = null, bIdx = -1, failed = null;
-  for(let b=i-1;b>=i-30;b--){
-    const L = breakoutAt(P, b);
-    if(L == null) continue;
-    let bad = false;
-    for(let k=b+1;k<=i;k++){ if(cs[k].c < L - tol){ bad = true; break; } }
-    if(bad){ if(!failed) failed = {L, b}; continue; }
-    phase = "pending"; level = L; bIdx = b; break;
+  let H, L, start, end;
+  if(bull){
+    H = h1; L = null;
+    for(let q=A.length-1;q>=0;q--) if(A[q].t==="L" && A[q].i<H.i){ L = A[q]; break; }
+    if(!L) return e;
+    start = L.i; end = H.i;
+  } else {
+    L = l1; H = null;
+    for(let q=A.length-1;q>=0;q--) if(A[q].t==="H" && A[q].i<L.i){ H = A[q]; break; }
+    if(!H) return e;
+    start = H.i; end = L.i;
   }
-  if(phase === "none" && failed){ phase = "failed"; level = failed.L; bIdx = failed.b; }
+  if(!(H.p > L.p)) return e;
+  e.bias = bull ? "bull" : "bear";
+  e.leg = {H, L, start, end, bull};
+  e.holdAdvice = bull ? "HOLD" : "SELL";
+  e.watch = bull ? L.p : ll;
 
-  let buy = false, slPrice = null, touched = false, pattern = false;
-  if(phase === "pending"){
-    touched = c.l <= level + tol;
-    const rng = c.h - c.l;
-    let hammer = false;
-    if(rng > 0){
-      const body = Math.abs(c.c-c.o), lw = Math.min(c.o,c.c) - c.l;
-      hammer = lw >= 2*body && lw >= 0.5*rng && (c.c-c.l)/rng >= 0.6;
-    }
-    const p = cs[i-1];
-    const engulf = p.c < p.o && c.c > c.o && c.o <= p.c && c.c >= p.o;
-    pattern = hammer || engulf;
-    if(touched && pattern && c.c > level){
-      const sl = Math.min(c.l, level - tol) - 0.1*atr;
-      const risk = close - sl;
-      if(risk > 0 && risk <= 3*atr && risk/close >= 0.004){ buy = true; slPrice = sl; }
-    }
+  const prof = profileFor(P, start, end, L.p, H.p);
+  e.prof = prof; e.poc = prof.poc;
+  const tol = 0.3*atr;
+  const sl = bull ? L.p - 0.1*atr : H.p + 0.1*atr;
+
+  let status, entry, risk;
+  if(bull){
+    if(c.l > prof.poc + tol) status = "wait";
+    else if(close < prof.poc) status = "below";
+    else status = "zone";
+    entry = status==="zone" ? close : prof.poc;
+    risk = entry - sl;
+  } else {
+    if(c.h < prof.poc - tol) status = "wait";
+    else if(close > prof.poc) status = "above";
+    else status = "zone";
+    entry = status==="zone" ? close : prof.poc;
+    risk = sl - entry;
   }
+  e.entry = entry; e.sl = sl; e.risk = risk;
+  e.tp = bull ? entry + 2*risk : entry - 2*risk;
 
-  let holdAdvice, watch;
-  if(phase === "pending"){ holdAdvice = "HOLD"; watch = level - tol; }
-  else if(phase === "failed" && close < level - tol){ holdAdvice = "SELL"; watch = ll; }
-  else { holdAdvice = (down || close < ll) ? "SELL" : (up ? "HOLD" : "WATCH"); watch = ll; }
-
-  return {up, down, buy, slPrice, phase, level, since: bIdx>=0 ? i-bIdx : null, touched, pattern, holdAdvice, watch, trail:ll, e20, e50, e200, rsi, atr};
-}
-function nearestResistance(P, i){
-  const cs = P.cs, atr = P.atr[i], close = P.closes[i], tol = 0.5*atr;
-  const piv = [];
-  for(let k=Math.max(3,i-120);k<=i-3;k++) if(P.piv[k]) piv.push(k);
-  let best = null;
-  for(const k0 of piv){
-    const L0 = cs[k0].h;
-    let sum = 0, cnt = 0;
-    for(const k of piv){ if(Math.abs(cs[k].h-L0) <= tol){ sum += cs[k].h; cnt++; } }
-    if(cnt < 2) continue;
-    const L = sum/cnt;
-    if(L > close && (best === null || L < best)) best = L;
-  }
-  return best;
-}
-
-/* ----- Trend Breakout (para sa paghahambing) ----- */
-function evalTB(P, i){
-  const cs=P.cs, close=P.closes[i];
-  const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
-  const up   = close>e200 && e50>e200;
-  const down = close<e50 && e50<e200;
-  let hh=-Infinity, ll=Infinity;
-  for(let k=i-20;k<=i-1;k++) hh=Math.max(hh, cs[k].h);
-  for(let k=i-10;k<=i-1;k++) ll=Math.min(ll, cs[k].l);
-  const breakout = close>hh;
-  const extended = (close-e20) > 3*atr;
-  const buy  = up && breakout && !extended;
-  const exit = close<ll;
-  return {up, down, breakout, extended, buy, exit, hh, trail:ll, e20, e50, e200, rsi, atr};
-}
-
-/* ----- Pullback (luma, para sa paghahambing) ----- */
-function evalPullback(P, i){
-  const cs=P.cs, close=P.closes[i], c=cs[i];
-  const e20=P.e20[i], e50=P.e50[i], e200=P.e200[i], rsi=P.rsi[i], atr=P.atr[i];
-  const up   = close>e50 && e50>e200 && e50>P.e50[i-5];
-  const down = close<e50 && e50<e200;
-  let lowMin=Infinity, rsiMin=100;
-  for(let k=i-7;k<=i;k++){ lowMin=Math.min(lowMin, cs[k].l); rsiMin=Math.min(rsiMin, P.rsi[k]); }
-  const touched    = lowMin <= e20*1.002;
-  const recovering = rsiMin<=45 && rsi>P.rsi[i-1] && rsi>=45 && rsi<=65;
-  const bullish    = c.c>c.o && close>e20;
-  const extended   = rsi>=70 || (close-e20) > 2*atr;
-  const buy = up && touched && recovering && bullish && !extended;
-  return {up, down, touched, recovering, bullish, extended, buy, e20, e50, e200, rsi, atr};
-}
-function levelsAt(P, i, entry){
-  const atr = P.atr[i];
-  let swing = Infinity;
-  for(let k=i-9;k<=i;k++) swing = Math.min(swing, P.cs[k].l);
-  let sl = Math.min(swing, entry-1.5*atr);
-  sl = Math.max(sl, entry-3*atr);
-  if(!(sl < entry)) sl = entry-1.5*atr;
-  const tp = entry + 2*(entry-sl);
-  return {sl, tp};
-}
-/* Stop-loss at take-profit (1:2). Ang Break & Retest ay may sariling stop-loss mula sa rejection candle. */
-function levelsFor(e, P, i, entry){
-  if(e.slPrice != null){
-    const sl = e.slPrice;
-    if(!(sl < entry)) return null;
-    return {sl, tp: entry + 2*(entry-sl)};
-  }
-  return levelsAt(P, i, entry);
+  if(H.p - L.p < 2*atr){ e.status = "small"; return e; }
+  if(i - end > 80){ e.status = "stale"; return e; }
+  if(bull && close < L.p){ e.status = "broken"; e.holdAdvice = "SELL"; e.watch = ll; return e; }
+  if(bear && close > H.p){ e.status = "broken"; return e; }
+  const okRisk = risk > 0 && risk/entry >= 0.003 && risk <= 6*atr;
+  if(!okRisk){ e.status = "badrisk"; return e; }
+  e.status = status;
+  if(status === "zone") e.signal = bull ? "long" : "short";
+  return e;
 }
 function decide(e, hold){
-  if(!hold) return e.buy ? "BUY" : "WAIT";
-  return e.holdAdvice;
+  if(hold){
+    if(e.bias === "none") return "WATCH";
+    if(e.bias === "bull") return e.status === "broken" ? "SELL" : "HOLD";
+    return "SELL";
+  }
+  if(e.signal === "long") return "BUY";
+  if(e.bias === "bear" && !["small","stale","broken","badrisk"].includes(e.status)) return "BEAR";
+  return "WAIT";
 }
-function backtest(cs, budget, fn){
-  fn = fn || evalBR;
-  const P = prep(cs);
+
+/* ----- Backtest ----- */
+function btRun(P, cs, side){
   const trades = [];
   const FEE = 0.001;
-  let i = 200;
+  let i = 40;
   while(i < cs.length-2){
-    const e = fn(P, i);
-    if(!e.buy){ i++; continue; }
-    const entry = cs[i+1].o;
-    const lv = levelsFor(e, P, i, entry);
-    if(!lv){ i++; continue; }
-    const risk = entry - lv.sl;
-    let R=null, exitPrice=null, j=i+1, hit=false;
+    const e = evalSP(P, i);
+    if(e.signal !== side){ i++; continue; }
+    const entry = cs[i+1].o, sl = e.sl;
+    const risk = side==="long" ? entry - sl : sl - entry;
+    if(!(risk > 0) || risk/entry < 0.003){ i++; continue; }
+    const tp = side==="long" ? entry + 2*risk : entry - 2*risk;
+    let R = null, exitPrice = null, j = i+1, hit = false;
     const last = Math.min(i+100, cs.length-1);
     for(; j<=last; j++){
       const c = cs[j];
-      if(c.l <= lv.sl){ R=-1; exitPrice=lv.sl; break; }
-      if(c.h >= lv.tp){ R=2;  exitPrice=lv.tp; hit=true; break; }
+      if(side==="long"){
+        if(c.l <= sl){ R=-1; exitPrice=sl; break; }
+        if(c.h >= tp){ R=2; exitPrice=tp; hit=true; break; }
+      } else {
+        if(c.h >= sl){ R=-1; exitPrice=sl; break; }
+        if(c.l <= tp){ R=2; exitPrice=tp; hit=true; break; }
+      }
     }
-    if(R===null){
+    if(R === null){
       if(i+100 > cs.length-1) break;            // bukas pa ang trade pagdating ng dulo ng data
       exitPrice = cs[i+100].c;
-      R = (exitPrice-entry)/risk;
+      R = (side==="long" ? exitPrice-entry : entry-exitPrice)/risk;
       j = i+100;
     }
     R -= (entry*FEE + exitPrice*FEE)/risk;
@@ -366,9 +326,17 @@ function backtest(cs, budget, fn){
   const wins = trades.filter(t=>t.R>0).length;
   const totalR = trades.reduce((s,t)=>s+t.R,0);
   const tpHits = trades.filter(t=>t.hit).length;
-  const t0 = cs[Math.min(200, cs.length-1)].t;
+  return {n, wins, tpHits, totalR};
+}
+function statsOf(r, budget){
+  return {n:r.n, wins:r.wins, tpHits:r.tpHits, totalR:r.totalR,
+          winRate: r.n ? r.wins/r.n*100 : 0, tpRate: r.n ? r.tpHits/r.n*100 : 0, money: r.totalR*budget*0.01};
+}
+function backtest(cs, budget){
+  const P = prep(cs);
+  const t0 = cs[Math.min(40, cs.length-1)].t;
   const days = Math.max(1, Math.round((cs[cs.length-1].t - t0)/86400000));
-  return {n, wins, losses:n-wins, winRate: n? wins/n*100 : 0, tpRate: n? tpHits/n*100 : 0, tpHits, totalR, money: totalR*budget*0.01, days};
+  return {long: statsOf(btRun(P, cs, "long"), budget), short: statsOf(btRun(P, cs, "short"), budget), days};
 }
 /* ================= PURE END ================= */
 
@@ -493,14 +461,16 @@ function money(n){
   const s = Math.abs(n).toLocaleString("en-US",{minimumFractionDigits:2,maximumFractionDigits:2});
   return (n<0?"-":"")+"$"+s;
 }
+function sm(n){ return (n>=0?"+":"")+money(n); }
 const COINS = ["BTC","ETH","SOL","BNB","XRP","DOGE","ADA","AVAX","LINK","TON"];
 const TF_LABEL = {"15m":"15 minuto","1h":"1 oras","4h":"4 na oras","1d":"1 araw"};
 const HINTS = {
-  trend:"Ang trend ay ang direksyon ng presyo sa mas mahabang panahon. Mas mataas ang tsansa kapag sumasabay ka sa paakyat na trend.",
-  sl:"Ito ang presyong lalabas ka kapag bumaba ang coin, para hindi lumaki ang lugi. Ilagay ito bilang order sa exchange mo.",
-  tp:"Ito ang presyong lalabas ka kapag tumaas ang coin, para makuha mo ang kita.",
-  qty:"Kinalkula ito para 1% lang ng budget mo ang pwedeng mawala kung tumama ang presyo sa stop-loss.",
-  br:"Break & Retest: hinihintay munang lumampas ang presyo sa isang key level (resistance) na may mataas na volume. Pagkatapos, hinihintay itong bumalik sa level at magpakita ng rejection candle (hammer o bullish engulfing) bago bumili. Ang stop-loss ay nasa ilalim ng wick."
+  bias:"Ang bias ay ang direksyon ng galaw. Bullish kapag mas mataas ang bawat bagong swing high at swing low. Bearish kapag mas mababa ang bawat isa.",
+  sp:"Swing + POC: hinahanap ang huling swing low at swing high. Sa pagitan nila, ginagawa ang volume profile at hinahanap ang POC (presyong pinakamaraming na-trade). Doon ang possible na entry kapag bumalik ang presyo. Ang stop-loss ay nasa labas ng swing.",
+  poc:"Ang POC (Point of Control) ay ang presyo na pinakamaraming volume na na-trade sa loob ng range. Madalas itong tinatalbugan ng presyo kapag bumabalik.",
+  sl:"Ito ang presyong lalabas ka kapag sumablay ang trade, para hindi lumaki ang lugi. Ilagay ito bilang order sa exchange mo.",
+  tp:"Ito ang presyong lalabas ka para makuha ang kita. Dalawang beses ang layo nito kumpara sa stop-loss (1:2).",
+  qty:"Kinalkula ito para 1% lang ng budget mo ang pwedeng mawala kung tumama ang presyo sa stop-loss."
 };
 function help(key){
   return `<button class="q" data-h="${key}" aria-label="Paliwanag">?</button>`;
@@ -508,66 +478,97 @@ function help(key){
 
 /* ---------- State ---------- */
 let state = null;
+let lastChart = null;
 
 /* ---------- Check ---------- */
 function reasonsFor(verdict, e, levelPrice){
-  const L = e.level != null ? "$"+fmt(e.level) : "";
-  if(verdict==="BUY") return [
-    "Nag-breakout ang presyo sa key level na "+L+" at sumara sa itaas, na may mataas na volume.",
-    "Bumalik ang presyo sa level at nagpakita ng rejection candle (hammer o bullish engulfing).",
-    "Nasa ilalim ng wick ang stop-loss, kaya malinaw kung kailan mali ang trade."
-  ];
-  if(verdict==="SELL"){
-    if(e.phase==="failed") return [
-      "Bumalik ang presyo sa loob ng lumang zone ("+L+"), invalid na ang setup.",
-      "Mas mabuting lumabas para protektahan ang puhunan."
-    ];
-    return [
-      "Bumaba ang presyo sa pinakamababa ng huling 10 candle, humina na ang coin.",
-      "Mas mabuting ibenta bago lumaki ang lugi."
-    ];
-  }
-  if(verdict==="HOLD"){
-    if(e.phase==="pending") return [
-      "Nasa itaas pa ng level na "+L+" ang presyo.",
-      "Hawakan hangga't hindi nagsasara ang presyo sa ibaba ng $"+fmt(levelPrice)+"."
-    ];
-    return [
-      "Maayos pa ang takbo ng coin.",
-      "Hawakan hangga't hindi nagsasara ang presyo sa ibaba ng $"+fmt(levelPrice)+"."
-    ];
-  }
-  if(verdict==="WATCH") return [
-    "Walang malinaw na direksyon ang presyo.",
-    "Bantayan. Kung magsara sa ibaba ng $"+fmt(levelPrice)+", magandang magbenta na."
-  ];
-  // WAIT
+  const P$ = x => "$"+fmt(x);
+  const poc = e.poc != null ? P$(e.poc) : "";
   if(e.invalid) return [
-    "Bumaba na ang presyo sa ibaba ng stop-loss ng setup.",
+    "Lumampas na ang presyo sa stop-loss ng setup.",
     "Kanselado ito. Maghintay ng bagong setup."
   ];
-  if(e.phase==="pending"){
-    if(e.touched && e.pattern) return [
-      "May rejection candle sa level na "+L+", pero hindi sulit ang laki ng stop-loss.",
-      "Masyadong malaki o masyadong maliit ang stop-loss kumpara sa bayad. Hintayin ang susunod na setup."
-    ];
-    if(e.touched) return [
-      "Bumalik na ang presyo sa level na "+L+", pero wala pang rejection candle.",
-      "Hintayin ang hammer o bullish engulfing na sumasara sa itaas ng level."
+  if(verdict==="BUY") return [
+    "Bullish ang bias: mas mataas ang bagong swing high at swing low.",
+    "Bumalik ang presyo sa POC ("+poc+") ng volume profile mula swing low hanggang swing high, at sumara sa itaas nito.",
+    "Ang stop-loss ay nasa ibaba ng swing low, kaya malinaw kung kailan mali ang trade."
+  ];
+  if(verdict==="BEAR"){
+    if(e.signal==="short") return [
+      "Bearish ang bias: mas mababa ang bagong swing high at swing low.",
+      "Umakyat ang presyo sa POC ("+poc+") at sumara sa ibaba nito.",
+      "Huwag bumili. Ang plano sa ibaba ay para lang sa short (futures)."
     ];
     return [
-      "Nag-breakout na ang presyo sa "+L+" ("+e.since+" candle ang nakaraan).",
-      "Hintayin na bumalik ito sa level at magpakita ng rejection candle."
+      "Bearish ang bias: mas mababa ang bagong swing high at swing low.",
+      "Huwag munang bumili. Kung may futures ka, hintayin ang pag-akyat sa POC ("+poc+") para sa possible na short.",
+      "Ang plano sa ibaba ay para lang sa short, hindi para sa spot."
     ];
   }
-  if(e.phase==="failed") return [
-    "Bumalik sa loob ng zone ang presyo, kanselado ang breakout sa "+L+".",
-    "Maghintay ng bagong breakout."
+  if(verdict==="SELL"){
+    if(e.bias==="bull") return [
+      "Bumaba ang presyo sa ilalim ng swing low ("+P$(e.leg.L.p)+"), sira ang bullish setup.",
+      "Mas mabuting lumabas bago lumaki ang lugi."
+    ];
+    return [
+      "Bearish ang bias: mas mababa ang bagong swing high at swing low.",
+      "Kung may hawak ka, isipin nang magbenta."
+    ];
+  }
+  if(verdict==="HOLD") return [
+    "Bullish pa ang bias.",
+    "Hawakan hangga't hindi nagsasara ang presyo sa ibaba ng swing low ("+P$(levelPrice)+")."
+  ];
+  if(verdict==="WATCH") return [
+    "Walang malinaw na swing structure ngayon.",
+    "Bantayan. Kung magsara sa ibaba ng "+P$(levelPrice)+", magandang magbenta na."
+  ];
+  // WAIT
+  if(e.bias==="none") return [
+    "Walang malinaw na bias: halo-halo ang mga swing high at swing low.",
+    "Hintayin na maging mas mataas ang mga ito (bullish) o mas mababa (bearish)."
+  ];
+  if(e.status==="small") return [
+    "Masyadong maliit ang galaw mula swing low hanggang swing high, hindi ito mapagkakatiwalaan.",
+    "Maghintay ng mas malinaw na swing."
+  ];
+  if(e.status==="stale") return [
+    "Luma na ang huling swing, malayo na sa kasalukuyang presyo.",
+    "Maghintay ng bagong swing."
+  ];
+  if(e.status==="broken") return [
+    "Lumampas ang presyo sa dulo ng swing, kanselado ang setup.",
+    "Maghintay ng bagong swing."
+  ];
+  if(e.status==="badrisk") return [
+    "May setup, pero hindi sulit ang laki ng stop-loss kumpara sa galaw (masyadong malaki o maliit).",
+    "Hintayin ang susunod na setup."
+  ];
+  if(e.status==="below") return [
+    "Bullish ang bias, pero bumaba ang presyo sa ilalim ng POC ("+poc+").",
+    "Hintayin na sumara ulit ito sa itaas ng POC. Kung bumaba sa swing low, kanselado."
   ];
   return [
-    "Wala pang valid na breakout. Kailangang sumara ang presyo sa itaas ng key level na may mataas na volume.",
-    e.nearRes != null ? "Bantayan ang resistance sa $"+fmt(e.nearRes)+"." : "Walang malinaw na key level na paulit-ulit na tinatalbugan ngayon."
+    "Bullish ang bias, pero malayo pa ang presyo sa POC.",
+    "Maghintay na bumaba ito sa POC ("+poc+") at sumara pabalik sa itaas. Doon ang possible na entry."
   ];
+}
+
+/* Plano: bili ngayon (buy), hintayin ang POC (limit), o short (futures lang) */
+function planFor(verdict, e, price){
+  let kind = null;
+  if(verdict==="BUY") kind = "buy";
+  else if(verdict==="BEAR" && e.entry != null) kind = "short";
+  else if(verdict==="WAIT" && e.bias==="bull" && e.entry != null && ["wait","below","badrisk"].includes(e.status)) kind = "limit";
+  if(!kind) return null;
+  const long = e.bias === "bull";
+  let entry = e.entry;
+  if((kind==="buy" || kind==="short") && e.signal) entry = price;
+  const sl = e.sl;
+  const risk = long ? entry - sl : sl - entry;
+  if(!(risk > 0)) return null;
+  const tp = long ? entry + 2*risk : entry - 2*risk;
+  return {kind, entry, sl, tp, risk, long};
 }
 
 async function runCheck(){
@@ -588,12 +589,11 @@ async function runCheck(){
     const closed = candles.slice(0,-1);          // ang huling candle ay hindi pa tapos
     const P = prep(closed);
     const i = closed.length-1;
-    const e = evalBR(P, i);
-    e.nearRes = nearestResistance(P, i);
+    const e = evalSP(P, i);
     let verdict = decide(e, hold);
-    if(verdict==="BUY" && !levelsFor(e, P, i, price)){ e.invalid = true; verdict = "WAIT"; }
+    if(verdict==="BUY" && !(price > e.sl)){ e.invalid = true; verdict = "WAIT"; }
     state = {coin, tf, closed, budget};
-    renderResult({coin, tf, budget, source, price, e, verdict, P, i, lastT: candles[candles.length-1].t, chartCandles: candles.slice(-60)});
+    renderResult({coin, tf, budget, source, price, e, verdict, candles});
   }catch(err){
     $("out").innerHTML = `<div class="card err">Hindi makuha ang data: ${err.message}<br><br><span class="small">Subukang lumipat sa ibang network (WiFi o mobile data) o i-off ang VPN.</span></div>`;
   }finally{
@@ -602,87 +602,90 @@ async function runCheck(){
 }
 
 function renderResult(r){
-  const {coin, tf, budget, source, price, e, verdict, P, i} = r;
+  const {coin, tf, budget, source, price, e, verdict, candles} = r;
   const V = {
-    BUY:  {t:"🟢 PWEDENG BUMILI",     c:"GREEN",  s:"Maganda ang setup ngayon."},
-    WAIT: {t:"🟡 MAGHINTAY MUNA",     c:"YELLOW", s:"Wala pang magandang pasok."},
-    AVOID:{t:"🔴 HUWAG MUNANG BUMILI",c:"RED",    s:"Hindi maganda ang kalagayan ngayon."},
-    SELL: {t:"🔴 MAGBENTA NA",        c:"RED",    s:"Sira na ang setup, mag-ingat."},
-    HOLD: {t:"🟢 HAWAKAN MUNA",       c:"GREEN",  s:"Maayos pa ang takbo ng coin."},
-    WATCH:{t:"🟡 BANTAYAN",           c:"YELLOW", s:"Walang malinaw na direksyon."}
+    BUY:  {t:"🟢 PWEDENG BUMILI",          c:"GREEN",  s:"Nasa POC na ang presyo, maganda ang setup."},
+    WAIT: {t:"🟡 MAGHINTAY MUNA",          c:"YELLOW", s:"Wala pang magandang pasok."},
+    BEAR: {t:"🔴 BEARISH · HUWAG BUMILI",  c:"RED",    s:"Pababa ang bias. Hindi magandang bumili ngayon."},
+    SELL: {t:"🔴 MAGBENTA NA",             c:"RED",    s:"Sira na ang setup, mag-ingat."},
+    HOLD: {t:"🟢 HAWAKAN MUNA",            c:"GREEN",  s:"Maayos pa ang takbo ng coin."},
+    WATCH:{t:"🟡 BANTAYAN",                c:"YELLOW", s:"Walang malinaw na direksyon."}
   }[verdict];
-  const trendTxt = e.up ? "⬆️ Paakyat" : e.down ? "⬇️ Pababa" : "↔️ Walang direksyon";
+  const biasTxt = e.bias==="bull" ? "⬆️ Bullish" : e.bias==="bear" ? "⬇️ Bearish" : "↔️ Walang malinaw";
   const levelPrice = e.watch;
 
-  let plan = "";
-  let planData = null;
-  if(verdict==="BUY"){
-    const lv = levelsFor(e, P, i, price);
-    const risk = price - lv.sl;
+  const pl = planFor(verdict, e, price);
+  let plan = "", planData = null;
+  if(pl){
     const riskAmt = budget*0.01;
-    let qty = riskAmt/risk;
-    let cost = qty*price;
-    let capped = false;
-    if(cost > budget){ cost = budget; qty = budget/price; capped = true; }
-    const loss = qty*risk, gain = qty*risk*2;
-    planData = {coin, tf, entry:price, sl:lv.sl, tp:lv.tp, qty, cost};
+    let qty = riskAmt/pl.risk, cost = qty*pl.entry, capped = false;
+    if(cost > budget){ cost = budget; qty = budget/pl.entry; capped = true; }
+    const loss = qty*pl.risk, gain = qty*pl.risk*2;
+    const title = pl.kind==="buy" ? "Plano mo" : pl.kind==="limit" ? "Plano: hintayin ang POC" : "Plano kung mag-short (futures lang)";
+    const entryLbl = pl.kind==="buy" ? "Presyo ng pagbili" : pl.kind==="limit" ? "Entry (sa POC)" : (e.signal==="short" ? "Entry (short)" : "Entry (short, sa POC)");
+    const note = pl.kind==="buy"
+      ? `Ang take-profit na 1:2 ay mas malaki ang kita kaysa lugi, pero hindi sigurado na maaabot ito. Tingnan ang "Subukan sa nakaraan" para sa totoong porsyento ng pag-abot.`
+      : pl.kind==="limit"
+      ? `Hindi pa ito bilihan. Ito ang plano kung bumalik ang presyo sa POC at sumara sa itaas nito. Kung hindi na bumalik, walang trade.`
+      : `Para lang ito sa futures (short). Hindi ito pwede sa spot. Mas mataas ang panganib dahil sa liquidation at funding fee.`;
+    if(pl.kind==="buy") planData = {coin, tf, entry:pl.entry, sl:pl.sl, tp:pl.tp, qty, cost};
     plan = `
       <div class="card">
-        <h2>Plano mo</h2>
+        <h2>${title}</h2>
         <div class="grid">
-          <div class="kv"><span>Presyo ng pagbili</span><strong>$${fmt(price)}</strong></div>
-          <div class="kv"><span>Stop-loss ${help("sl")}</span><strong style="color:var(--sell)">$${fmt(lv.sl)}</strong></div>
-          <div class="kv"><span>Take-profit ${help("tp")}</span><strong style="color:var(--buy)">$${fmt(lv.tp)}</strong></div>
-          <div class="kv"><span>Ilan ang bibilhin ${help("qty")}</span><strong>${fmt(qty)} ${coin}</strong></div>
+          <div class="kv"><span>${entryLbl}</span><strong>$${fmt(pl.entry)}</strong></div>
+          <div class="kv"><span>Stop-loss ${help("sl")}</span><strong style="color:var(--sell)">$${fmt(pl.sl)}</strong></div>
+          <div class="kv"><span>Take-profit ${help("tp")}</span><strong style="color:var(--buy)">$${fmt(pl.tp)}</strong></div>
+          <div class="kv"><span>Ilan ${help("qty")}</span><strong>${fmt(qty)} ${coin}</strong></div>
           <div class="kv"><span>Halaga</span><strong>${money(cost)}</strong></div>
           <div class="kv"><span>Pwedeng malugi</span><strong style="color:var(--sell)">${money(loss)}</strong></div>
           <div class="kv" style="grid-column:1/-1"><span>Posibleng kita</span><strong style="color:var(--buy)">${money(gain)}</strong></div>
         </div>
-        <div id="hint-box"></div>
         ${capped?`<div class="small" style="margin-top:8px">Na-cap sa budget mo, kaya mas mababa ang pwedeng malugi kaysa 1%.</div>`:""}
-        <div class="small" style="margin-top:8px">Ang take-profit na 1:2 ay mas malaki ang kita kaysa lugi, pero hindi sigurado na maaabot ito. Tingnan ang "Subukan sa nakaraan" para sa totoong porsyento ng pag-abot sa coin na ito.</div>
-        <button class="alt" id="saveTrade">💾 I-save ang trade</button>
+        <div class="small" style="margin-top:8px">${note}</div>
+        ${pl.kind==="buy" ? `<button class="alt" id="saveTrade">💾 I-save ang trade</button>` : ""}
       </div>`;
   }
 
   /* Para sa chart */
-  const dir = e.up ? 1 : e.down ? -1 : 0;
+  const dir = e.bias==="bull" ? 1 : e.bias==="bear" ? -1 : 0;
   const dirTxt = dir>0 ? "⬆️ Pataas" : dir<0 ? "⬇️ Pababa" : "↔️ Pagilid";
-  const dirNote = "Batay lang ito sa trend ngayon. Hindi ito sigurado at pwedeng magbago anumang oras.";
-  const chartLevels = [];
-  if(planData){
-    chartLevels.push({price:planData.entry, label:"Bili", color:"#3b82f6"});
-    chartLevels.push({price:planData.sl, label:"Stop-loss", color:"#ef4444"});
-    chartLevels.push({price:planData.tp, label:"Take-profit", color:"#22c55e"});
-  } else if(verdict==="HOLD"||verdict==="WATCH"){
-    chartLevels.push({price:levelPrice, label:"Exit", color:"#f59e0b"});
-  } else if(verdict==="WAIT"){
-    if(e.phase==="pending") chartLevels.push({price:e.level, label:"Key level", color:"#f59e0b"});
-    else if(e.phase==="failed") chartLevels.push({price:e.level, label:"Lumang level", color:"#f59e0b"});
-    else if(e.nearRes != null && (e.nearRes - price) <= 10*e.atr) chartLevels.push({price:e.nearRes, label:"Resistance", color:"#f59e0b"});
+  const levels = [];
+  if(pl){
+    const col = pl.kind==="buy" ? "#3b82f6" : "#60a5fa";
+    levels.push({price:pl.entry, label:(pl.kind==="buy"?"Entry":"Entry"), color:col, dy:12});
+    levels.push({price:pl.sl, label:"Stop-loss", color:"#ef4444", dy:-4});
+    levels.push({price:pl.tp, label:"Take-profit", color:"#22c55e", dy:-4});
+  } else if(verdict==="HOLD"||verdict==="WATCH"||verdict==="SELL"){
+    levels.push({price:levelPrice, label:"Bantayan", color:"#f59e0b", dy:-4});
   }
-  lastChart = {cs:r.chartCandles, levels:chartLevels, dir, atr:e.atr};
+  const n = candles.length;
+  let vs = e.leg ? e.leg.start - 8 : n - 60;
+  vs = Math.max(0, Math.min(vs, n-60));
+  if(n - vs > 160) vs = n - 160;
+  lastChart = {cs:candles, vs, e, levels, dir, atr:e.atr || 0};
 
   const holdLine = (verdict==="HOLD"||verdict==="WATCH")
     ? `<div class="price">Antas na babantayan: <b>$${fmt(levelPrice)}</b> (kapag nagsara sa ibaba nito, isipin nang magbenta)</div>` : "";
+  const pocLine = e.poc != null ? `<div class="price">POC: <b>$${fmt(e.poc)}</b> ${help("poc")}</div>` : "";
 
   const why = reasonsFor(verdict, e, levelPrice);
   $("out").innerHTML = `
     <div class="card verdict">
-      <div class="small">${coin} · ${TF_LABEL[tf]} · Break & Retest ${help("br")}</div>
+      <div class="small">${coin} · ${TF_LABEL[tf]} · Swing + POC ${help("sp")}</div>
       <div class="big ${V.c}">${V.t}</div>
       <div class="sentence">${V.s}</div>
-      <div class="chip">Trend: ${trendTxt} ${help("trend")}</div>
+      <div class="chip">Bias: ${biasTxt} ${help("bias")}</div>
       <div class="price">Presyo ngayon: $${fmt(price)}</div>
+      ${pocLine}
       ${holdLine}
       ${tf==="15m" ? `<div class="small" style="margin-top:8px;color:var(--wait)">Sa 15 minuto, mabilis ang galaw at malaki ang epekto ng bayad kumpara sa kita. Subukan muna sa nakaraan bago gumamit ng totoong pera.</div>` : ""}
-      <div id="hint-box-top"></div>
     </div>
     <div class="card">
       <h2>Chart · ${coin} · ${TF_LABEL[tf]}</h2>
       <canvas id="chart"></canvas>
-      <div class="small" style="margin-top:6px">🟩 tumaas · 🟥 bumaba ang candle. Ang putol-putol na arrow sa kanan ay ang <b>posibleng direksyon</b>: ${dirTxt}.</div>
-      <div class="small" style="margin-top:4px">${dirNote}</div>
+      <div class="small" style="margin-top:6px">🟩 tumaas · 🟥 bumaba ang candle. Ang <b>asul na bilog</b> ay ang swing high at swing low. Ang mga asul na bar ay ang volume profile, at ang dilaw na guhit ay ang <b>POC</b>. Ang putol-putol na arrow ay ang <b>posibleng direksyon</b>: ${dirTxt}.</div>
+      <div class="small" style="margin-top:4px">Batay lang ang arrow sa bias ngayon. Hindi ito sigurado at pwedeng magbago anumang oras.</div>
     </div>
     ${plan}
     <div class="card">
@@ -693,7 +696,7 @@ function renderResult(r){
       <button class="alt" id="runBt" style="margin-top:0">🧪 Subukan sa nakaraan</button>
       <div id="bt"></div>
     </div>
-    <div class="small" style="text-align:center;margin-bottom:12px">Source: ${source} · huling candle: ${new Date(r.lastT).toLocaleString()}${source==="Coinbase"&&tf==="4h"?"<br>(Coinbase: 6 na oras ang candle na gamit)":""}</div>
+    <div class="small" style="text-align:center;margin-bottom:12px">Source: ${source} · huling candle: ${new Date(candles[n-1].t).toLocaleString()}${source==="Coinbase"&&tf==="4h"?"<br>(Coinbase: 6 na oras ang candle na gamit)":""}</div>
   `;
 
   try{ drawChart(); }catch(err){}
@@ -707,8 +710,7 @@ function renderResult(r){
   }
 }
 
-const STRAT = {BR:"Break & Retest (bago)", TB:"Trend Breakout (1:2)", PB:"Pullback (luma)"};
-function sm(n){ return (n>=0?"+":"")+money(n); }
+/* ---------- Backtest UI ---------- */
 function btBlock(title, r){
   return `<div style="margin-top:14px">
     <h2>${title}</h2>
@@ -720,12 +722,13 @@ function btBlock(title, r){
     </div>
   </div>`;
 }
-function cmpText(list, scope){
-  if(list.every(x=>x[1].n===0)) return "Walang signal ang lahat ng strategy sa panahong ito.";
-  const best = list.slice().sort((x,y)=>y[1].money-x[1].money)[0];
-  if(best[1].money <= 0) return "Lugi ang lahat ng strategy "+scope+".";
-  return "Pinakamaganda "+scope+": "+STRAT[best[0]]+".";
+function verdictFor(r, minN){
+  if(r.n === 0) return {t:"Walang signal sa panahong ito.", c:"YELLOW"};
+  if(r.n < minN) return {t:"Kakaunti ang trades ("+r.n+"), hindi pa sapat na batayan.", c:"YELLOW"};
+  if(r.totalR > 0) return {t:"Kumita sa nakaraan.", c:"GREEN"};
+  return {t:"Lugi sa nakaraan. Mag-ingat.", c:"RED"};
 }
+const T_LONG = "Long · para sa spot (BUY)", T_SHORT = "Short · kung may futures";
 async function runBacktest(){
   if(!state) return;
   const btn = $("runBt");
@@ -735,31 +738,22 @@ async function runBacktest(){
     const h = await fetchHistory(state.coin, state.tf);
     if(h && h.candles.length >= 230) closed = h.candles.slice(0,-1);
   }catch(e){}
-  const a = backtest(closed, state.budget, evalBR);
-  const b = backtest(closed, state.budget, evalTB);
-  const c = backtest(closed, state.budget, evalPullback);
-  let verdictLine, color;
-  if(a.n < 10){ verdictLine = "Kakaunti ang trades, hindi pa sapat na batayan."; color = "YELLOW"; }
-  else if(a.totalR > 0){ verdictLine = "Kumita sa nakaraan."; color = "GREEN"; }
-  else { verdictLine = "Hindi kumita sa nakaraan. Mag-ingat sa coin na ito."; color = "RED"; }
-  const cmp = cmpText([["BR",a],["TB",b],["PB",c]], "sa coin at timeframe na ito");
+  const b = backtest(closed, state.budget);
+  const vl = verdictFor(b.long, 10), vsh = verdictFor(b.short, 10);
   $("bt").innerHTML = `
     <div style="margin-top:12px">
-      <div class="bt-big ${color}">${verdictLine}</div>
-      <div class="small">${cmp}</div>
-      ${btBlock(STRAT.BR, a)}
-      ${btBlock(STRAT.TB, b)}
-      ${btBlock(STRAT.PB, c)}
-      <div class="small" style="margin-top:10px">Sinubukan sa huling ${a.days} araw ng ${state.coin} (${TF_LABEL[state.tf]}). Kung ang budget mo ay ${money(state.budget)}, 1% ang risk sa bawat trade, at may take-profit na 1:2. Kasama na ang bayad na 0.1% sa bawat bili at benta. Kapag walang tumama sa stop-loss o take-profit sa loob ng 100 candle, isinasara ang trade sa presyo noon. Kung kakaunti ang trades, huwag umasa sa isang pagsubok lang. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
+      <div class="bt-big ${vl.c}">Long: ${vl.t}</div>
+      <div class="small ${vsh.c}">Short: ${vsh.t}</div>
+      ${btBlock(T_LONG, b.long)}
+      ${btBlock(T_SHORT, b.short)}
+      <div class="small" style="margin-top:10px">Sinubukan sa huling ${b.days} araw ng ${state.coin} (${TF_LABEL[state.tf]}). Kung ang budget mo ay ${money(state.budget)}, 1% ang risk sa bawat trade, at may take-profit na 1:2. Kasama na ang bayad na 0.1% sa bawat bili at benta. Kapag walang tumama sa stop-loss o take-profit sa loob ng 100 candle, isinasara ang trade sa presyo noon. Kung kakaunti ang trades, huwag umasa sa isang pagsubok lang. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
     </div>`;
   btn.disabled = false; btn.textContent = "🧪 Ulitin ang pagsubok";
 }
 
 function mkAgg(){ return {n:0, wins:0, tpHits:0, totalR:0}; }
 function addAgg(g, r){ g.n += r.n; g.wins += r.wins; g.tpHits += r.tpHits; g.totalR += r.totalR; }
-function finAgg(g, budget){
-  return {n:g.n, wins:g.wins, losses:g.n-g.wins, winRate:g.n? g.wins/g.n*100 : 0, tpRate:g.n? g.tpHits/g.n*100 : 0, totalR:g.totalR, money:g.totalR*budget*0.01};
-}
+function finAgg(g, budget){ return statsOf(g, budget); }
 let allRunning = false;
 async function runAll(){
   if(allRunning) return;
@@ -767,7 +761,7 @@ async function runAll(){
   const out = $("allOut"), btn = $("allBt");
   if(!(budget > 0)){ out.innerHTML = `<div class="err" style="margin-top:8px">Maglagay ng budget na higit sa 0.</div>`; return; }
   allRunning = true; btn.disabled = true; out.innerHTML = "";
-  const G = {BR:mkAgg(), TB:mkAgg(), PB:mkAgg()};
+  const GL = mkAgg(), GS = mkAgg();
   const rows = [], failed = [];
   let span = 0;
   for(let k=0;k<COINS.length;k++){
@@ -775,71 +769,63 @@ async function runAll(){
     btn.textContent = "Sinusuri ang "+coin+" ("+(k+1)+"/"+COINS.length+")...";
     try{
       const h = await fetchHistory(coin, tf);
-      const closed = h.candles.slice(0,-1);
-      const a = backtest(closed, budget, evalBR);
-      const b = backtest(closed, budget, evalTB);
-      const c = backtest(closed, budget, evalPullback);
-      addAgg(G.BR, a); addAgg(G.TB, b); addAgg(G.PB, c);
-      rows.push({coin, a, b, c});
-      span = Math.max(span, a.days);
+      const b = backtest(h.candles.slice(0,-1), budget);
+      addAgg(GL, b.long); addAgg(GS, b.short);
+      rows.push({coin, b});
+      span = Math.max(span, b.days);
     }catch(e){ failed.push(coin); }
   }
   if(!rows.length){
     out.innerHTML = `<div class="err" style="margin-top:8px">Walang makuhang data. Subukang lumipat sa ibang network (WiFi o mobile data).</div>`;
   } else {
-    const fa = finAgg(G.BR, budget), fb = finAgg(G.TB, budget), fc = finAgg(G.PB, budget);
-    const items = [["BR",fa],["TB",fb],["PB",fc]];
-    const best = items.slice().sort((x,y)=>y[1].money-x[1].money)[0];
-    let line, color;
-    if(items.every(x=>x[1].n===0)){ line = "Walang signal ang kahit anong strategy sa panahong ito."; color = "YELLOW"; }
-    else if(best[1].money <= 0){ line = "Lugi ang lahat ng strategy sa nakaraan. Huwag munang gumamit ng totoong pera sa mga ito."; color = "RED"; }
-    else if(best[1].n < 30){ line = "Kakaunti pa ang trades ("+best[1].n+"), hindi pa sapat na batayan. Pinakamaganda sa ngayon: "+STRAT[best[0]]+"."; color = "YELLOW"; }
-    else { line = "Kumita sa nakaraan ang "+STRAT[best[0]]+", pero hindi ito garantiya."; color = "GREEN"; }
+    const fl = finAgg(GL, budget), fs = finAgg(GS, budget);
+    const vl = verdictFor(fl, 30), vsh = verdictFor(fs, 30);
     out.innerHTML = `
       <div style="margin-top:12px">
-        <div class="bt-big ${color}">${line}</div>
-        ${btBlock(STRAT.BR, fa)}
-        ${btBlock(STRAT.TB, fb)}
-        ${btBlock(STRAT.PB, fc)}
+        <div class="bt-big ${vl.c}">Long: ${vl.t}</div>
+        <div class="small ${vsh.c}">Short: ${vsh.t}</div>
+        ${btBlock(T_LONG, fl)}
+        ${btBlock(T_SHORT, fs)}
         <h2 style="margin-top:14px">Bawat coin</h2>
-        <div class="small">BR = Break & Retest · TB = Trend Breakout · PB = Pullback. Bilang ng trades at resulta.</div>
-        ${rows.map(r=>`<div class="small" style="margin-top:4px"><b>${r.coin}</b> · BR: ${r.a.n} (${sm(r.a.money)}) · TB: ${r.b.n} (${sm(r.b.money)}) · PB: ${r.c.n} (${sm(r.c.money)})</div>`).join("")}
+        ${rows.map(r=>`<div class="small" style="margin-top:4px"><b>${r.coin}</b> · Long: ${r.b.long.n} (${sm(r.b.long.money)}) · Short: ${r.b.short.n} (${sm(r.b.short.money)})</div>`).join("")}
         <div class="small" style="margin-top:10px">Sinubukan sa ${rows.length} coin (${TF_LABEL[tf]}, hanggang ${span} araw ang kasaysayan), budget ${money(budget)}, 1% risk, take-profit 1:2, bayad 0.1% sa bawat bili at benta.${failed.length ? " Hindi nakuha ang "+failed.join(", ")+"." : ""} Magkakasabay ang galaw ng mga coin, kaya hindi ito kasing-tibay ng magkakahiwalay na pagsubok. Hindi ito garantiya ng mangyayari sa hinaharap.</div>
       </div>`;
   }
   allRunning = false; btn.disabled = false; btn.textContent = "Subukan sa lahat ng coin";
 }
 
-/* ---------- Candle chart ---------- */
-let lastChart = null;
+/* ---------- Candle chart + swing + volume profile ---------- */
 function drawChart(){
   if(!lastChart) return;
   const cv = $("chart");
   if(!cv) return;
-  const cs = lastChart.cs, levels = lastChart.levels, dir = lastChart.dir, atr = lastChart.atr;
+  const {cs:all, vs, e, levels, dir, atr} = lastChart;
+  const cs = all.slice(vs), n = cs.length;
   const dpr = window.devicePixelRatio || 1;
   const W = cv.clientWidth, H = cv.clientHeight;
-  if(!W || !H || !cs.length) return;
+  if(!W || !H || !n) return;
   cv.width = W*dpr; cv.height = H*dpr;
   const ctx = cv.getContext("2d");
   ctx.setTransform(dpr,0,0,dpr,0,0);
   ctx.clearRect(0,0,W,H);
 
-  const padL=6, padR=58, padT=10, padB=10, FUT=10;
-  const n = cs.length, slots = n+FUT;
+  const padL=6, padR=58, padT=14, padB=14, FUT=8;
+  const slots = n+FUT;
   const plotW = W-padL-padR, plotH = H-padT-padB;
   const slotW = plotW/slots;
   const last = cs[n-1].c;
   const target = last + dir*2*atr;
   const band = atr;
+  const leg = e && e.leg, prof = e && e.prof;
 
   let hi = -Infinity, lo = Infinity;
   cs.forEach(c=>{ hi=Math.max(hi,c.h); lo=Math.min(lo,c.l); });
   levels.forEach(l=>{ hi=Math.max(hi,l.price); lo=Math.min(lo,l.price); });
+  if(leg){ hi=Math.max(hi,leg.H.p); lo=Math.min(lo,leg.L.p); }
   hi = Math.max(hi, target+band); lo = Math.min(lo, target-band);
-  const pad = (hi-lo)*0.05 || 1;
+  const pad = (hi-lo)*0.06 || 1;
   hi += pad; lo -= pad;
-  const X = i => padL + (i+0.5)*slotW;
+  const X = s => padL + (s+0.5)*slotW;
   const Y = p => padT + (hi-p)/(hi-lo)*plotH;
 
   // grid at presyo sa kanan
@@ -853,8 +839,24 @@ function drawChart(){
     ctx.fillText(fmt(p), W-padR+4, y);
   }
 
+  // range ng volume profile (kulay at mga bar)
+  let xs = 0, xe = 0;
+  if(leg && prof){
+    const s0 = Math.max(0, leg.start-vs), s1 = Math.max(0, leg.end-vs);
+    xs = X(s0)-slotW/2; xe = X(s1)+slotW/2;
+    ctx.fillStyle = leg.bull ? "rgba(34,197,94,0.07)" : "rgba(239,68,68,0.07)";
+    ctx.fillRect(xs, Y(leg.H.p), Math.max(1,xe-xs), Y(leg.L.p)-Y(leg.H.p));
+    const maxW = Math.min(plotW*0.4, Math.max(40, (xe-xs)*0.6));
+    for(let b=0;b<prof.bins.length;b++){
+      const bw = prof.max ? prof.bins[b]/prof.max*maxW : 0;
+      const yTop = Y(prof.lo+(b+1)*prof.step), yBot = Y(prof.lo+b*prof.step);
+      ctx.fillStyle = b===prof.pocIdx ? "rgba(245,158,11,0.55)" : "rgba(59,130,246,0.32)";
+      ctx.fillRect(xs, yTop+0.5, bw, Math.max(1, yBot-yTop-1));
+    }
+  }
+
   // mga candle
-  const bw = Math.max(2, slotW*0.65);
+  const bw = Math.max(1.2, slotW*0.65);
   cs.forEach((c,i)=>{
     const up = c.c >= c.o;
     const col = up ? "#22c55e" : "#ef4444";
@@ -868,16 +870,60 @@ function drawChart(){
   });
   ctx.globalAlpha = 1;
 
-  // mga guhit (bili, stop-loss, take-profit, bantayan)
+  // swing: guhit na nag-uugnay at mga bilog
+  if(e && e.A){
+    const pts = e.A.filter(p=>p.i>=vs).map(p=>({x:X(p.i-vs), y:Y(p.p), t:p.t, i:p.i}));
+    if(pts.length > 1){
+      ctx.strokeStyle = "rgba(147,164,188,0.7)"; ctx.lineWidth = 1; ctx.setLineDash([]);
+      ctx.beginPath(); pts.forEach((p,k)=>{ if(k) ctx.lineTo(p.x,p.y); else ctx.moveTo(p.x,p.y); }); ctx.stroke();
+    }
+    pts.forEach(p=>{
+      ctx.fillStyle = "rgba(147,164,188,0.9)";
+      ctx.beginPath(); ctx.arc(p.x,p.y,2,0,Math.PI*2); ctx.fill();
+    });
+  }
+  if(leg){
+    ctx.strokeStyle = leg.bull ? "#22c55e" : "#ef4444"; ctx.lineWidth = 1.6; ctx.setLineDash([]);
+    const a = leg.bull ? leg.L : leg.H, b = leg.bull ? leg.H : leg.L;
+    ctx.beginPath(); ctx.moveTo(X(Math.max(0,a.i-vs)), Y(a.p)); ctx.lineTo(X(b.i-vs), Y(b.p)); ctx.stroke();
+  }
+
+  // POC (hanggang kanan)
+  if(leg && prof){
+    const y = Y(prof.poc);
+    ctx.strokeStyle = "#f59e0b"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+    ctx.beginPath(); ctx.moveTo(xs,y); ctx.lineTo(W-padR,y); ctx.stroke();
+    ctx.fillStyle = "#f59e0b"; ctx.textAlign = "right"; ctx.font = "bold 11px -apple-system, Roboto, sans-serif";
+    ctx.fillText("POC $"+fmt(prof.poc), W-padR-4, y-7);
+  }
+
+  // entry, stop-loss, take-profit
   levels.forEach(l=>{
     const y = Y(l.price);
     ctx.strokeStyle = l.color; ctx.lineWidth = 1.2; ctx.setLineDash([5,4]);
     ctx.beginPath(); ctx.moveTo(padL,y); ctx.lineTo(W-padR,y); ctx.stroke();
     ctx.setLineDash([]);
-    ctx.fillStyle = l.color; ctx.textAlign = "left";
+    ctx.fillStyle = l.color; ctx.textAlign = "right";
     ctx.font = "11px -apple-system, Roboto, sans-serif";
-    ctx.fillText(l.label+" $"+fmt(l.price), padL+4, y-7);
+    ctx.fillText(l.label+" $"+fmt(l.price), W-padR-4, y+(l.dy||-4));
   });
+
+  // mga marka ng swing high / swing low
+  if(leg){
+    const mark = (pt, txt, above)=>{
+      const x = X(Math.max(0,pt.i-vs)), y = Y(pt.p);
+      ctx.fillStyle = "#3b82f6"; ctx.strokeStyle = "#fff"; ctx.lineWidth = 1.5; ctx.setLineDash([]);
+      ctx.beginPath(); ctx.arc(x,y,5,0,Math.PI*2); ctx.fill(); ctx.stroke();
+      ctx.font = "bold 11px -apple-system, Roboto, sans-serif";
+      ctx.fillStyle = "#93c5fd";
+      const tw = ctx.measureText(txt).width;
+      const tx = Math.min(Math.max(x, padL+tw/2), W-padR-tw/2);
+      ctx.textAlign = "center";
+      ctx.fillText(txt, tx, above ? y-13 : y+14);
+    };
+    mark(leg.H, "Swing High", true);
+    mark(leg.L, "Swing Low", false);
+  }
 
   // posibleng direksyon
   const x0 = X(n-1), y0 = Y(last), x1 = X(n+FUT-1);
